@@ -1,0 +1,43 @@
+/* Compléments propres au frontend React ; tout le reste vient de app.css (copié de index.html). */
+.auth {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg);
+}
+.auth-card {
+  width: min(440px, 100%);
+}
+.auth-brand .brand b {
+  color: var(--ink);
+}
+.auth-brand .brand small {
+  color: var(--muted);
+}
+.auth-brand .brand {
+  padding: 0 0 4px;
+}
+code.mono {
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.callout {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+/* Dans une cellule de tableau, l'interrupteur doit garder sa taille (dans index.html il est toujours dans un flex). */
+.switch {
+  display: inline-block;
+  vertical-align: middle;
+}
+/* .app occupe 100 % de son parent : dans index.html c'est <body>, ici #root. */
+#root {
+  height: 100%;
+}

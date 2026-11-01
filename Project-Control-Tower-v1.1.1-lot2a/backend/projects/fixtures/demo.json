@@ -1,0 +1,679 @@
+{
+ "clients": [
+  {
+   "code": "ndl",
+   "name": "Nordline Logistique",
+   "sector": "Logistique & transport",
+   "city": "Paris La Défense",
+   "color": "#0B7A75"
+  },
+  {
+   "code": "vau",
+   "name": "Vauban Assurances",
+   "sector": "Assurance",
+   "city": "Lille",
+   "color": "#3D5BA9"
+  },
+  {
+   "code": "orp",
+   "name": "Orphée Santé",
+   "sector": "Santé",
+   "city": "Lyon",
+   "color": "#9A4E8E"
+  }
+ ],
+ "people": [
+  {
+   "code": "nh",
+   "username": "i.roche",
+   "first_name": "Isabelle",
+   "last_name": "Roche",
+   "email": "i.roche@demo-esn.fr",
+   "title": "Directrice des opérations",
+   "team": "Direction",
+   "role": "direction",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "mp",
+   "username": "o.lambert",
+   "first_name": "Olivier",
+   "last_name": "Lambert",
+   "email": "o.lambert@demo-esn.fr",
+   "title": "Manager delivery ECM",
+   "team": "Delivery ECM",
+   "role": "manager",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "cd",
+   "username": "c.fontaine",
+   "first_name": "Camille",
+   "last_name": "Fontaine",
+   "email": "c.fontaine@demo-esn.fr",
+   "title": "Responsable de compte",
+   "team": "Commerce",
+   "role": "commercial",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "sm",
+   "username": "e.navarro",
+   "first_name": "Élise",
+   "last_name": "Navarro",
+   "email": "e.navarro@demo-esn.fr",
+   "title": "Cheffe de projet",
+   "team": "Delivery ECM",
+   "role": "cdp",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "kd",
+   "username": "r.guerin",
+   "first_name": "Romain",
+   "last_name": "Guérin",
+   "email": "r.guerin@demo-esn.fr",
+   "title": "Tech Lead ECM",
+   "team": "Delivery ECM",
+   "role": "techlead",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "ib",
+   "username": "s.mansouri",
+   "first_name": "Sarah",
+   "last_name": "Mansouri",
+   "email": "s.mansouri@demo-esn.fr",
+   "title": "Consultante fonctionnelle",
+   "team": "Delivery ECM",
+   "role": "consultant",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "tl",
+   "username": "m.perrin",
+   "first_name": "Maxime",
+   "last_name": "Perrin",
+   "email": "m.perrin@demo-esn.fr",
+   "title": "Développeur .NET",
+   "team": "Delivery ECM",
+   "role": "dev",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "as",
+   "username": "y.belkacem",
+   "first_name": "Yanis",
+   "last_name": "Belkacem",
+   "email": "y.belkacem@demo-esn.fr",
+   "title": "Développeur React",
+   "team": "Digital",
+   "role": "dev",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "lr",
+   "username": "c.marchetti",
+   "first_name": "Chloé",
+   "last_name": "Marchetti",
+   "email": "c.marchetti@demo-esn.fr",
+   "title": "Consultante GED (4/5)",
+   "team": "Delivery ECM",
+   "role": "consultant",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "jm",
+   "username": "m.giraud",
+   "first_name": "Manon",
+   "last_name": "Giraud",
+   "email": "m.giraud@demo-esn.fr",
+   "title": "Testeuse QA",
+   "team": "Qualité",
+   "role": "testeur",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "nb",
+   "username": "n.berger",
+   "first_name": "Nicolas",
+   "last_name": "Berger",
+   "email": "n.berger@demo-esn.fr",
+   "title": "Manager delivery Santé",
+   "team": "Delivery Santé",
+   "role": "manager",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "cl",
+   "username": "c.lemoine",
+   "first_name": "Clara",
+   "last_name": "Lemoine",
+   "email": "c.lemoine@demo-esn.fr",
+   "title": "Cheffe de projet",
+   "team": "Delivery Digital",
+   "role": "cdp",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "none",
+   "username": "none",
+   "first_name": "Non",
+   "last_name": "affecté",
+   "email": "",
+   "title": "À affecter",
+   "team": "—",
+   "role": "cdp",
+   "client": null,
+   "virtual": true
+  },
+  {
+   "code": "hb",
+   "username": "b.royer",
+   "first_name": "Bastien",
+   "last_name": "Royer",
+   "email": "b.royer@demo-esn.fr",
+   "title": "Administrateur plateforme",
+   "team": "IT interne",
+   "role": "admin",
+   "client": null,
+   "virtual": false
+  },
+  {
+   "code": "lf",
+   "username": "frederic.mallet",
+   "first_name": "Frédéric",
+   "last_name": "Mallet",
+   "email": "frederic.mallet@nordline-demo.fr",
+   "title": "DSI adjoint · Nordline",
+   "team": "Nordline",
+   "role": "client",
+   "client": "ndl",
+   "virtual": false
+  }
+ ],
+ "projects": [
+  {
+   "id": "p1",
+   "code": "NDL-MIG",
+   "name": "Migration Documentum → Alfresco",
+   "client": "ndl",
+   "method": "V",
+   "pm": "sm",
+   "tl": "kd",
+   "start": "2026-03-02",
+   "end": "2026-12-15",
+   "progress": 64
+  },
+  {
+   "id": "p2",
+   "code": "NDL-UNI",
+   "name": "Unisource",
+   "client": "ndl",
+   "method": "Agile",
+   "pm": "sm",
+   "tl": "kd",
+   "start": "2026-05-04",
+   "end": "2027-01-29",
+   "progress": 55
+  },
+  {
+   "id": "p3",
+   "code": "NDL-GED",
+   "name": "GED",
+   "client": "ndl",
+   "method": "Hybride",
+   "pm": "sm",
+   "tl": "kd",
+   "start": "2026-06-01",
+   "end": "2027-03-31",
+   "progress": 46
+  },
+  {
+   "id": "p4",
+   "code": "VAU-DIG",
+   "name": "Projet Digital",
+   "client": "vau",
+   "method": "Agile",
+   "pm": "cl",
+   "tl": "kd",
+   "start": "2026-02-02",
+   "end": "2026-11-27",
+   "progress": 74
+  },
+  {
+   "id": "p5",
+   "code": "ORP-PAT",
+   "name": "Portail Patient",
+   "client": "orp",
+   "method": "V",
+   "pm": "cl",
+   "tl": "tl",
+   "start": "2026-07-01",
+   "end": "2027-06-30",
+   "progress": 22
+  }
+ ],
+ "actions": [
+  {
+   "id": "A-1042",
+   "project": "p1",
+   "title": "Connecteur API SAP – lecture des factures",
+   "owner": "kd",
+   "status": "doing",
+   "type": "Technique",
+   "due": "2026-09-30"
+  },
+  {
+   "id": "A-1043",
+   "project": "p1",
+   "title": "Mapping des métadonnées Documentum → Alfresco",
+   "owner": "ib",
+   "status": "done",
+   "type": "Fonctionnelle",
+   "due": "2026-04-30"
+  },
+  {
+   "id": "A-1044",
+   "project": "p1",
+   "title": "Script de reprise historique 2015–2020",
+   "owner": "tl",
+   "status": "doing",
+   "type": "Technique",
+   "due": "2026-10-14"
+  },
+  {
+   "id": "A-1045",
+   "project": "p1",
+   "title": "Habilitations et vues par entité juridique",
+   "owner": "lr",
+   "status": "review",
+   "type": "Fonctionnelle",
+   "due": "2026-10-02"
+  },
+  {
+   "id": "A-1046",
+   "project": "p1",
+   "title": "Correctifs anomalies recette interne lot 2",
+   "owner": "tl",
+   "status": "blocked",
+   "type": "Technique",
+   "due": "2026-10-09"
+  },
+  {
+   "id": "A-1047",
+   "project": "p1",
+   "title": "Fournir l'accès VPN à l'environnement de recette",
+   "owner": "lf",
+   "status": "blocked",
+   "type": "Client",
+   "due": "2026-09-29"
+  },
+  {
+   "id": "A-1048",
+   "project": "p1",
+   "title": "Workflow de validation des factures",
+   "owner": "kd",
+   "status": "planned",
+   "type": "Technique",
+   "due": "2026-10-16"
+  },
+  {
+   "id": "A-1049",
+   "project": "p1",
+   "title": "Plan de tests d'intégration",
+   "owner": "jm",
+   "status": "doing",
+   "type": "Test",
+   "due": "2026-10-09"
+  },
+  {
+   "id": "A-1050",
+   "project": "p1",
+   "title": "Documentation d'exploitation",
+   "owner": "ib",
+   "status": "todo",
+   "type": "Fonctionnelle",
+   "due": "2026-11-20"
+  },
+  {
+   "id": "A-1051",
+   "project": "p1",
+   "title": "Valider les spécifications du workflow factures",
+   "owner": "lf",
+   "status": "review",
+   "type": "Client",
+   "due": "2026-10-07"
+  },
+  {
+   "id": "A-1052",
+   "project": "p1",
+   "title": "Préparer le COPIL d'octobre",
+   "owner": "sm",
+   "status": "todo",
+   "type": "Pilotage",
+   "due": "2026-10-08"
+  },
+  {
+   "id": "A-1053",
+   "project": "p1",
+   "title": "Purge des doublons archives 2012",
+   "owner": "tl",
+   "status": "blocked",
+   "type": "Technique",
+   "due": "2026-10-12"
+  },
+  {
+   "id": "A-2101",
+   "project": "p2",
+   "title": "Service de rapprochement des fournisseurs",
+   "owner": "as",
+   "status": "doing",
+   "type": "Technical Task",
+   "due": "2026-10-09"
+  },
+  {
+   "id": "A-2102",
+   "project": "p2",
+   "title": "BUG-118 · Doublons sur import CSV",
+   "owner": "tl",
+   "status": "blocked",
+   "type": "Bug",
+   "due": "2026-10-07"
+  },
+  {
+   "id": "A-2103",
+   "project": "p2",
+   "title": "TECH · Pipeline CI de migration",
+   "owner": "kd",
+   "status": "done",
+   "type": "Technical Task",
+   "due": "2026-09-30"
+  },
+  {
+   "id": "A-2104",
+   "project": "p2",
+   "title": "Écran du tableau de rapprochement",
+   "owner": "as",
+   "status": "planned",
+   "type": "Technical Task",
+   "due": "2026-10-23"
+  },
+  {
+   "id": "A-2105",
+   "project": "p2",
+   "title": "Documentation de l'API de migration",
+   "owner": "ib",
+   "status": "todo",
+   "type": "Technical Task",
+   "due": "2026-10-09"
+  },
+  {
+   "id": "A-2106",
+   "project": "p2",
+   "title": "Règles de rapprochement par SIRET",
+   "owner": "as",
+   "status": "done",
+   "type": "Technical Task",
+   "due": "2026-09-29"
+  },
+  {
+   "id": "A-2107",
+   "project": "p2",
+   "title": "Tests d'acceptation de la fusion",
+   "owner": "ib",
+   "status": "todo",
+   "type": "Test",
+   "due": "2026-10-09"
+  },
+  {
+   "id": "A-2108",
+   "project": "p2",
+   "title": "Endpoints de lecture des fournisseurs",
+   "owner": "tl",
+   "status": "done",
+   "type": "Technical Task",
+   "due": "2026-09-30"
+  },
+  {
+   "id": "A-2109",
+   "project": "p2",
+   "title": "Tests unitaires de l'API",
+   "owner": "tl",
+   "status": "done",
+   "type": "Technical Task",
+   "due": "2026-10-01"
+  },
+  {
+   "id": "A-2110",
+   "project": "p2",
+   "title": "Parser CSV multi-encodage",
+   "owner": "tl",
+   "status": "done",
+   "type": "Technical Task",
+   "due": "2026-09-28"
+  },
+  {
+   "id": "A-1054",
+   "project": "p1",
+   "title": "Compte rendu de l'atelier workflow factures",
+   "owner": "ib",
+   "status": "done",
+   "type": "Fonctionnelle",
+   "due": "2026-09-30"
+  },
+  {
+   "id": "A-1055",
+   "project": "p1",
+   "title": "Revue des vues par entité juridique",
+   "owner": "lr",
+   "status": "done",
+   "type": "Fonctionnelle",
+   "due": "2026-09-26"
+  },
+  {
+   "id": "A-1056",
+   "project": "p1",
+   "title": "Rejeu de la campagne de non-régression lot 1",
+   "owner": "jm",
+   "status": "done",
+   "type": "Test",
+   "due": "2026-09-18"
+  },
+  {
+   "id": "A-3003",
+   "project": "p3",
+   "title": "Atelier plan de classement · direction financière",
+   "owner": "ib",
+   "status": "done",
+   "type": "Fonctionnelle",
+   "due": "2026-09-30"
+  },
+  {
+   "id": "A-4005",
+   "project": "p4",
+   "title": "Recette du parcours de souscription, étapes 1 et 2",
+   "owner": "jm",
+   "status": "done",
+   "type": "Test",
+   "due": "2026-09-22"
+  },
+  {
+   "id": "A-5004",
+   "project": "p5",
+   "title": "Rédaction de la SFD prise de rendez-vous v0.9",
+   "owner": "ib",
+   "status": "done",
+   "type": "Fonctionnelle",
+   "due": "2026-09-25"
+  },
+  {
+   "id": "A-2111",
+   "project": "p2",
+   "title": "Pipeline de déploiement DEV",
+   "owner": "kd",
+   "status": "planned",
+   "type": "Technical Task",
+   "due": "2026-10-08"
+  },
+  {
+   "id": "A-3001",
+   "project": "p3",
+   "title": "Plan de classement – direction financière",
+   "owner": "lr",
+   "status": "doing",
+   "type": "Fonctionnelle",
+   "due": "2026-10-16"
+  },
+  {
+   "id": "A-3002",
+   "project": "p3",
+   "title": "Paramétrage OCR factures fournisseurs",
+   "owner": "ib",
+   "status": "planned",
+   "type": "Fonctionnelle",
+   "due": "2026-10-16"
+  },
+  {
+   "id": "A-4001",
+   "project": "p4",
+   "title": "Parcours de souscription mobile – étape 3",
+   "owner": "as",
+   "status": "doing",
+   "type": "User Story",
+   "due": "2026-09-25"
+  },
+  {
+   "id": "A-4002",
+   "project": "p4",
+   "title": "Intégration du prestataire de paiement",
+   "owner": "as",
+   "status": "blocked",
+   "type": "Technique",
+   "due": "2026-09-25"
+  },
+  {
+   "id": "A-4003",
+   "project": "p4",
+   "title": "Recette accessibilité RGAA",
+   "owner": "jm",
+   "status": "doing",
+   "type": "Test",
+   "due": "2026-10-09"
+  },
+  {
+   "id": "A-4004",
+   "project": "p4",
+   "title": "Refonte de l'espace assuré",
+   "owner": "as",
+   "status": "doing",
+   "type": "User Story",
+   "due": "2026-09-30"
+  },
+  {
+   "id": "A-5001",
+   "project": "p5",
+   "title": "Spécifications de la prise de rendez-vous",
+   "owner": "ib",
+   "status": "doing",
+   "type": "Fonctionnelle",
+   "due": "2026-10-16"
+  },
+  {
+   "id": "A-5002",
+   "project": "p5",
+   "title": "Maquettes UX du portail",
+   "owner": "as",
+   "status": "done",
+   "type": "Fonctionnelle",
+   "due": "2026-09-18"
+  },
+  {
+   "id": "A-5003",
+   "project": "p5",
+   "title": "Étude d'interopérabilité HL7 FHIR",
+   "owner": "tl",
+   "status": "planned",
+   "type": "Technique",
+   "due": "2026-10-30"
+  }
+ ],
+ "scope": {
+  "nh": "*",
+  "mp": [
+   "p1",
+   "p2",
+   "p3",
+   "p4"
+  ],
+  "cd": [
+   "p1",
+   "p2",
+   "p3",
+   "p4"
+  ],
+  "sm": [
+   "p1",
+   "p2",
+   "p3"
+  ],
+  "kd": [
+   "p1",
+   "p2",
+   "p3",
+   "p4"
+  ],
+  "ib": [
+   "p1",
+   "p2",
+   "p3",
+   "p5"
+  ],
+  "tl": [
+   "p1",
+   "p2",
+   "p3",
+   "p4",
+   "p5"
+  ],
+  "as": [
+   "p2",
+   "p4",
+   "p5"
+  ],
+  "lr": [
+   "p1",
+   "p3"
+  ],
+  "jm": [
+   "p1",
+   "p4"
+  ],
+  "nb": [
+   "p5"
+  ],
+  "cl": [
+   "p4",
+   "p5"
+  ],
+  "none": [],
+  "hb": "*",
+  "lf": [
+   "p1",
+   "p2",
+   "p3"
+  ]
+ }
+}
