@@ -1,0 +1,36 @@
+from django.urls import path
+
+from . import views as v
+
+urlpatterns = [
+    path("projects", v.ProjectListView.as_view()),
+    path("policy", v.TenantPolicyView.as_view()),
+    path("projects/<str:pk>", v.MethodologyView.as_view()),
+    path("projects/<str:pk>/impact", v.ImpactView.as_view()),
+    path("projects/<str:pk>/assist", v.AssistView.as_view()),
+    path("projects/<str:pk>/capacity", v.CapacityView.as_view()),
+    path("projects/<str:pk>/allocations", v.AllocationListView.as_view()),
+    path("allocations/<int:aid>", v.AllocationDetailView.as_view()),
+    path("availabilities", v.AvailabilityListView.as_view()),
+    path("availabilities/<int:aid>", v.AvailabilityDetailView.as_view()),
+    path("projects/<str:pk>/phases", v.PhaseListView.as_view()),
+    path("phases/<int:pid>", v.PhaseDetailView.as_view()),
+    path("projects/<str:pk>/weeks/<str:week>", v.WeekView.as_view()),
+    path("projects/<str:pk>/weeks/<str:week>/<str:action>", v.WeekActionView.as_view()),
+    path("goals/<int:gid>", v.GoalDetailView.as_view()),
+    path("projects/<str:pk>/backlog", v.BacklogView.as_view()),
+    path("projects/<str:pk>/backlog/reorder", v.BacklogReorderView.as_view()),
+    path("backlog/<int:iid>", v.BacklogItemView.as_view()),
+    path("projects/<str:pk>/sprints", v.SprintListView.as_view()),
+    path("projects/<str:pk>/scrum-dashboard", v.ScrumDashboardView.as_view()),
+    path("sprints/<int:sid>", v.SprintView.as_view()),
+    path("sprints/<int:sid>/<str:action>", v.SprintActionView.as_view()),
+    path("sprint-items/<int:eid>", v.EntryView.as_view()),
+    path("impediments/<int:eid>", v.ImpedimentView.as_view()),
+    path("projects/<str:pk>/retros", v.RetroListView.as_view()),
+    path("retros/<int:rid>", v.RetroView.as_view()),
+    path("retros/<int:rid>/<str:action>", v.RetroActionView.as_view()),
+    path("feedback/<int:fid>/vote", v.FeedbackVoteView.as_view()),
+    path("improvements/<int:iid>", v.ImprovementView.as_view()),
+    path("projects/<str:pk>/reports", v.ReportsView.as_view()),
+]

@@ -87,7 +87,7 @@ class UserManagementTests(AdminBase):
 
     def test_last_active_admin_is_protected(self):
         User.objects.filter(role_id="admin").exclude(pk=self.admin.pk).update(is_active=False)
-        other = User.objects.create(username="admin2", role_id="admin")
+        other = User.objects.create(username="admin2", role_id="admin", tenant=self.admin.tenant)
         self.client.force_authenticate(other)
         r = self.client.patch(f"/api/admin/users/{self.admin.id}", {"isActive": False}, format="json")
         self.assertEqual(r.status_code, 200)  # il reste admin2
@@ -228,6 +228,10 @@ class NotificationTests(AdminBase):
 
 class StatusTests(AdminBase):
     def test_database_status(self):
+        # Lot 3a : l'état de la base est un paramètre global de la plateforme, réservé au Pilote.
+        self.assertEqual(self.client.get("/api/admin/database").status_code, 403)
+        pilot = User.objects.create(username="pilote-test", role_id="superadmin", tenant=None)
+        self.client.force_authenticate(pilot)
         r = self.client.get("/api/admin/database").json()
         self.assertTrue(r["connected"])
         self.assertEqual(r["migrations"]["pending"], [])
@@ -236,8 +240,9 @@ class StatusTests(AdminBase):
 
     def test_endpoints_and_logs(self):
         endpoints = {e["path"]: e for e in self.client.get("/api/admin/api/endpoints").json()}
-        self.assertEqual(endpoints["/api/admin/users"]["access"], "admin")
-        self.assertEqual(endpoints["/api/health"]["access"], "public")
+        # La liste montre la version courante /api/v1/ (lot 2a) ; /api/ reste servi en alias.
+        self.assertEqual(endpoints["/api/v1/admin/users"]["access"], "admin")
+        self.assertEqual(endpoints["/api/v1/health"]["access"], "public")
         self.client.get("/api/projects")
         self.assertTrue(ApiRequestLog.objects.filter(path="/api/projects", status=200).exists())
         stats = self.client.get("/api/admin/api/stats?hours=1").json()

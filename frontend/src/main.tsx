@@ -5,6 +5,7 @@ import { App } from "./App";
 import { ToastProvider } from "./components/ui";
 import "./styles/app.css";
 import "./styles/configuration.css";
+import "./styles/calendar.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

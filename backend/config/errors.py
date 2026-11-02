@@ -15,3 +15,8 @@ class ApiError(exceptions.APIException):
 class PasswordChangeRequired(exceptions.PermissionDenied):
     default_detail = "Vous devez changer votre mot de passe avant de continuer."
     error_code = "PASSWORD_CHANGE_REQUIRED"
+
+
+class TenantInactive(exceptions.PermissionDenied):
+    default_detail = "L'accès à votre organisation est suspendu. Contactez votre administrateur."
+    error_code = "TENANT_INACTIVE"

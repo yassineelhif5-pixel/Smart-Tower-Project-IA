@@ -16,6 +16,24 @@ Toutes les données sont des données de démonstration, générées dans le nav
 - L'assistant IA répond en mode local (calcul sur les données de démonstration, mêmes restrictions par profil) : la rédaction par Claude n'est disponible que dans la version publiée sur claude.ai.
 - Les modifications ne sont pas enregistrées côté serveur ; seuls le thème, le profil choisi et quelques paramètres restent dans le navigateur.
 
+## SaaS multi-tenant, offres et licences (version 1.3.0)
+
+- **Un tenant par entreprise cliente**, données totalement isolées : `MULTI_TENANT_ARCHITECTURE.md`, preuves dans `TENANT_ISOLATION.md`.
+- **Pilote (Super Admin Global)** : console « Pilote » (tableau de bord, entreprises, offres, demandes, journal, base de données).
+- **Administrateur d'entreprise** : Configuration (comptes, licences et demandes, matrice des droits, délégations, API, notifications, journal).
+- **Offres, abonnements, licences nominatives et concurrentes, demandes d'approbation** : `LICENSING.md`.
+- **Utilisateur** : page « Mon accès » (entreprise, licence, validité, rôle, droits, session).
+- API : `API_DOCUMENTATION.md` ; sécurité et audit : `SECURITY.md` ; état d'avancement : `IMPLEMENTATION_STATUS.md`.
+- **Mise en ligne sur Vercel avec Supabase** : `DEPLOYMENT.md`.
+
+## Pilotage Cycle en V et Scrum (version 1.5.0)
+
+Capacité réelle des équipes, semaines et Weekly Goals, Product Backlog, sprints, cérémonies, rétrospectives et actions d'amélioration. Voir `METHODOLOGY.md`.
+
+## Calendrier et collaboration (version 1.4.0)
+
+Calendrier intelligent (9 vues, conflits expliqués, charge, rappels, abonnement ICS) et discussions de projet internes ou Microsoft Teams. Voir `CALENDAR.md` et `TEAMS_INTEGRATION.md`.
+
 ## Architecture cible (migration en cours)
 
 L'application passe progressivement de `index.html` à une architecture SaaS :
@@ -28,7 +46,7 @@ L'application passe progressivement de `index.html` à une architecture SaaS :
 
 **Règle : le navigateur n'accède aux données que par l'API Django.** React n'utilise ni `supabase-js`, ni l'URL de la base, ni aucune clé. Seul Django se connecte à PostgreSQL, et c'est lui qui vérifie les droits à chaque requête.
 
-Ce qui est déjà migré : la connexion (session + CSRF, mot de passe provisoire à changer) et le module **Configuration**, réservé aux administrateurs. Le reste de l'application est encore dans `index.html`.
+Ce qui est déjà migré : la connexion (session + CSRF, mot de passe provisoire à changer) et le module **Configuration**, réservé aux administrateurs. Toutes les données métier ont leurs tables Django (lot 2b, voir `DATABASE.md`), mais les écrans correspondants sont encore dans `index.html`.
 
 ### Module Configuration (administrateurs)
 
@@ -51,10 +69,16 @@ python -m venv .venv && . .venv/bin/activate      # Windows : .venv\Scripts\acti
 pip install -r requirements.txt
 cp .env.example .env                              # puis renseigner les valeurs
 python manage.py migrate                          # tables, rôles et matrice par défaut
-python manage.py load_demo                        # facultatif : données de démonstration
-python manage.py create_default_admin             # compte admin / admin, à changer à la 1re connexion
+python manage.py load_demo                        # facultatif : données de démonstration (supabase/seed.sql)
+python manage.py create_default_admin             # admin / admin du tenant « Demo ESN », à changer à la 1re connexion
+python manage.py create_pilot pilote               # Pilote (Super Admin Global) : mot de passe provisoire affiché une fois
 python manage.py runserver
 ```
+
+Maintenance à planifier en production :
+- `python manage.py expire_licenses` toutes les 5 minutes (sessions inactives, abonnements échus) ;
+- `python manage.py purge_logs` une fois par jour (durées de conservation ; `--dry-run` pour simuler) ;
+- `python manage.py check_tenants` après tout import ou restauration (cohérence entre entreprises).
 
 Les comptes de démonstration (`s.mansouri`, `e.navarro`…) n'ont pas de mot de passe : un administrateur le définit avec « Réinitialiser » dans Configuration.
 
@@ -77,7 +101,14 @@ En production, servez le frontend construit (`npm run build`, dossier `dist/`) e
 | `DJANGO_ALLOWED_HOSTS` | Noms de domaine servis. |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Origines autorisées (https://…). |
 | `DATABASE_URL` | `postgresql://utilisateur:motdepasse@hôte:port/base` (obligatoire). |
-| `FIELD_ENCRYPTION_KEY` | Clé Fernet de chiffrement des secrets du module Configuration (obligatoire ; la changer rend les secrets existants illisibles). |
+| `FIELD_ENCRYPTION_KEY` | Clé Fernet de chiffrement des secrets du module Configuration (obligatoire). Pour en changer : `nouvelle,ancienne`, puis `python manage.py rotate_secrets`, puis retirer l'ancienne. |
+| `API_LOG_RETENTION_DAYS` | Conservation du journal des appels API, en jours (90 par défaut). |
+| `AUDIT_LOG_RETENTION_DAYS` | Conservation du journal d'audit, en jours (365 par défaut, minimum 30). |
+| `LICENSE_SESSION_IDLE_MINUTES` | Inactivité après laquelle une session rend sa licence concurrente (30 par défaut). |
+| `TRUST_X_FORWARDED_FOR` | `true` seulement derrière un reverse proxy de confiance (adresse IP du journal d'audit). Automatique sur Vercel. |
+| `DB_CONN_MAX_AGE` | Durée de vie des connexions à la base, en secondes (60 par défaut ; 0 sur Vercel). |
+| `CRON_SECRET` | Jeton de la maintenance planifiée `/api/v1/cron/maintenance` (vide : route désactivée). |
+| `PUBLIC_BASE_URL` | Adresse publique https (Teams : retour OAuth, liens, notifications). Vide : relecture périodique. |
 
 Le démarrage échoue avec un message qui nomme la variable manquante, sans jamais afficher de valeur. Modèle : `backend/.env.example`. Le fichier `.env` n'est jamais committé.
 
@@ -85,7 +116,7 @@ Le démarrage échoue avec un message qui nomme la variable manquante, sans jama
 
 Supabase n'est utilisé que comme hébergeur PostgreSQL, par Django. Pour pointer le backend vers Supabase : copiez la chaîne de connexion (Project Settings → Database), ajoutez `?sslmode=require`, placez-la dans `DATABASE_URL` côté serveur, puis `python manage.py migrate`. Les tests refusent de tourner sur une base Supabase.
 
-Attention : le projet Supabase contient déjà un schéma créé en SQL (dossier `supabase/`, voir plus bas). Avant de lancer les migrations Django dessus, il faut décider lequel des deux gère le schéma, pour éviter des migrations concurrentes.
+Décision validée (audit phase 1) : **Django est le seul propriétaire du schéma.** Le schéma SQL du dossier `supabase/` est une référence, portée progressivement en migrations Django (lot 2b), puis archivée. Ne lancez pas ce fichier SQL sur la base qui reçoit les migrations Django.
 
 ### Tests et vérifications
 
@@ -109,18 +140,15 @@ Les évolutions de schéma passent par les migrations Django (`python manage.py 
 | `GET /api/projects`, `GET /api/projects/{id}/actions`, `GET/POST /api/notifications` | connecté, selon son périmètre |
 | `/api/admin/users…`, `/api/admin/roles…`, `/api/admin/database…`, `/api/admin/api/…`, `/api/admin/secrets…`, `/api/admin/notifications…`, `/api/admin/audit` | administrateur, en session |
 
+Toutes les routes sont servies sous **`/api/v1/`** (version courante, utilisée par le frontend). L'ancien chemin `/api/` sans version reste servi à l'identique pour les applications tierces. Documentation OpenAPI pour les administrateurs connectés : `GET /api/v1/schema` et page Swagger `/api/v1/docs`.
+
 Toutes les erreurs ont la même forme : `{"code", "message", "details", "traceId"}`.
 
-## Schéma SQL Supabase initial
+## Dossier `supabase/` (archivé)
 
+Depuis le lot 2b, **Django est le seul propriétaire du schéma** : toutes les tables de ce dossier sont reprises dans les modèles Django (correspondance complète dans `DATABASE.md`). Le dossier reste dans le dépôt comme référence :
 
-Le dossier `supabase/` contient la base qui remplacera les données de démonstration :
-
-- `migrations/20261030220000_schema.sql` : tables, fonctions de droits (`app.*`) et règles RLS. Les droits de la page (rôle, périmètre, matrice des droits) sont appliqués par la base : un utilisateur ne reçoit que ce qu'il a le droit de voir, et un visiteur non connecté ne reçoit rien.
-- `seed.sql` : les données de démonstration actuelles. Ce fichier est généré : ne le modifiez pas à la main.
+- `migrations/20261030220000_schema.sql` : ancien schéma et règles RLS. **Ne pas l'exécuter** sur la base qui reçoit les migrations Django.
+- `seed.sql` : les données de démonstration, lues par `python manage.py load_demo`. Fichier généré : ne le modifiez pas à la main.
 - `generate_seed.py` : régénère `seed.sql` depuis `index.html` (`python3 supabase/generate_seed.py`, nécessite Playwright).
-
-Pour créer la base sur un projet Supabase :
-
-1. Exécutez `migrations/20261030220000_schema.sql`, puis `seed.sql` (éditeur SQL de Supabase, ou `supabase db reset` avec la CLI).
-2. Créez les comptes dans **Authentication → Users** avec les e-mails de la table `people`. Chaque compte est relié automatiquement à sa fiche.
+- `verify_django_equivalence.py` : contrôle ponctuel que les règles de lecture Django donnent les mêmes lignes que les RLS (mode d'emploi en tête du fichier).

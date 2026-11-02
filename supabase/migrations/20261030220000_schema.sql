@@ -1,4 +1,11 @@
 -- =====================================================================
+-- ARCHIVÉ (lot 2b, 2026-11-01) : Django est le seul propriétaire du schéma.
+-- Toutes ces tables sont reprises dans backend/projects/models.py (voir DATABASE.md)
+-- et leurs règles de lecture dans backend/projects/access.py (fonction visible).
+-- Ne pas exécuter ce fichier sur la base qui reçoit les migrations Django.
+-- Il reste une référence, et la source des règles RLS de seconde barrière (lot 3).
+-- =====================================================================
+-- =====================================================================
 -- Project Control Tower : schéma Supabase
 -- Reprend les listes de index.html (PEOPLE, CLIENTS, PROJECTS, ACTIONS…)
 -- et déplace dans la base les règles d'accès de la page :

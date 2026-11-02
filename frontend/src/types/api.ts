@@ -17,8 +17,11 @@ export interface Me {
   title: string;
   role: { code: string; label: string } | null;
   isAdmin: boolean;
+  isPlatformAdmin: boolean;
+  tenant: { slug: string; name: string; status: string } | null;
   mustChangePassword: boolean;
   permissions: Record<string, Flags>;
+  capabilities: string[];
 }
 
 export interface AdminUser {
@@ -156,4 +159,217 @@ export interface AuditRow {
   old: string;
   new: string;
   trace: string;
+}
+
+// --- Multi-tenant, offres et licences ---------------------------------------------------------
+
+export interface TenantRow {
+  id: number;
+  slug: string;
+  name: string;
+  status: "active" | "suspended" | "disabled" | "archived";
+  statusLabel: string;
+  statusReason: string;
+  statusChangedAt: string | null;
+  language: string;
+  createdAt: string;
+  users: number | null;
+  activeUsers: number | null;
+}
+
+export interface TenantDetail extends TenantRow {
+  userList: {
+    id: number;
+    username: string;
+    name: string;
+    role: string | null;
+    isActive: boolean;
+    lastLogin: string | null;
+  }[];
+}
+
+export interface CreatedTenant extends TenantRow {
+  admin: { id: number; username: string };
+  temporaryPassword: string;
+}
+
+export interface OfferVersion {
+  id: number;
+  number: number;
+  isPublished: boolean;
+  inUse: boolean;
+  price: string | null;
+  currency: string;
+  billingPeriod: "month" | "year" | "once";
+  durationDays: number | null;
+  trialDays: number;
+  licenseModel: "named" | "concurrent" | "mixed";
+  maxUsers: number | null;
+  namedLicenses: number;
+  concurrentLicenses: number;
+  maxSessionsPerUser: number | null;
+  features: string[];
+  limits: Record<string, unknown>;
+  conditions: string;
+  createdAt: string;
+}
+
+export interface Offer {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  position: number;
+  currentVersion: OfferVersion | null;
+  versions: OfferVersion[];
+}
+
+export interface Subscription {
+  id: number;
+  status: "trial" | "active" | "suspended" | "expired" | "cancelled";
+  statusLabel: string;
+  startDate: string;
+  endDate: string | null;
+  trialEnd: string | null;
+  offer: { id: number; code: string; name: string };
+  version: OfferVersion;
+  contract: { reference: string; terms: string } | null;
+}
+
+export interface StockLine {
+  total: number;
+  used: number;
+  available: number;
+}
+
+export interface LicensingOverview {
+  enforced: boolean;
+  subscription: Subscription | null;
+  stock: { named: StockLine; concurrent: StockLine };
+  users: { active: number; max: number | null };
+  activeSessions: number;
+  pendingRequests: number;
+}
+
+export interface TenantSubscriptionDetail extends LicensingOverview {
+  history: Subscription[];
+  allocations: { at: string; kind: string; delta: number; reason: string; request: number | null; by: string | null }[];
+}
+
+export interface LicenseRow {
+  id: number;
+  number: string;
+  kind: "named" | "concurrent";
+  status: string;
+  statusLabel: string;
+  holder: { id: number; username: string; since: string } | null;
+  session: { user: string; since: string } | null;
+}
+
+export interface LicenseList {
+  licenses: LicenseRow[];
+  unlicensedUsers: { id: number; username: string; name: string }[];
+}
+
+export interface SessionRow {
+  id: number;
+  user: { id: number; username: string };
+  license: string | null;
+  mode: string;
+  startedAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+}
+
+export type RequestStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "UNDER_REVIEW"
+  | "ADDITIONAL_INFORMATION_REQUIRED"
+  | "APPROVED"
+  | "PARTIALLY_APPROVED"
+  | "REJECTED"
+  | "CANCELLED"
+  | "FULFILLED";
+
+export interface LicenseRequest {
+  id: number;
+  tenant: { id: number; name: string };
+  kind: "named" | "concurrent" | "quota" | "offer" | "option";
+  kindLabel: string;
+  quantity: number | null;
+  quantityGranted: number | null;
+  targetOffer: { id: number; name: string } | null;
+  justification: string;
+  status: RequestStatus;
+  createdAt: string;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  fulfilledAt: string | null;
+  createdBy: string | null;
+  events?: { at: string; actor: string | null; from: string; to: string; comment: string }[];
+}
+
+export interface PilotDashboard {
+  tenants: {
+    total: number;
+    active: number;
+    suspended: number;
+    disabled: number;
+    archived: number;
+    trial: number;
+    withoutSubscription: number;
+  };
+  licenses: {
+    sold: number;
+    allocated: number;
+    available: number;
+    used: number;
+    expired: number;
+    byKind: Record<"named" | "concurrent", { allocated: number; used: number }>;
+  };
+  subscriptions: { active: number; trial: number; suspended: number; expired: number };
+  pendingRequests: number;
+  byOffer: { offer: string; tenants: number }[];
+  recentOperations: {
+    at: string;
+    actor: string | null;
+    tenant: string | null;
+    entity: string;
+    event: string;
+    result: string;
+  }[];
+}
+
+export interface PlatformAuditRow {
+  at: string;
+  actor: string | null;
+  tenant: string | null;
+  entity: string;
+  event: string;
+  old: string;
+  new: string;
+  trace: string;
+}
+
+export interface CapabilityMatrix {
+  catalog: { code: string; domain: string; action: string; delegable: boolean }[];
+  roles: { code: string; label: string; locked: boolean; capabilities: string[] }[];
+}
+
+export interface UserCapabilities {
+  overrides: { code: string; granted: boolean }[];
+  effective: string[];
+}
+
+export interface MyAccess {
+  user: { username: string; name: string; email: string; title: string };
+  company: { name: string; status: string } | null;
+  role: { code: string | null; label: string | null };
+  permissions: Record<string, Flags>;
+  capabilities: string[];
+  license: { mode: string; number: string | null };
+  access: { status: string; validUntil: string | null; subscriptionStatus: string | null };
+  session: { startedAt: string; expiresAt: string } | null;
 }

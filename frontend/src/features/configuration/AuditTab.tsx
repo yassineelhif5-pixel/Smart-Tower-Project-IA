@@ -11,9 +11,14 @@ export function AuditTab() {
       title="Journal d'audit"
       sub="Connexions, comptes, droits, accès, jetons, secrets et notifications. Aucun secret n'y est écrit."
       extra={
-        <button className="btn sm" onClick={audit.reload}>
-          Actualiser
-        </button>
+        <div className="btns">
+          <a className="btn sm" href="/api/v1/licensing/audit?export=csv" download>
+            Exporter (CSV)
+          </a>
+          <button className="btn sm" onClick={audit.reload}>
+            Actualiser
+          </button>
+        </div>
       }
     >
       <div className="tbl-wrap">

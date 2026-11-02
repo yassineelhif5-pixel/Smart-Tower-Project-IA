@@ -1,11 +1,34 @@
 import type { ReactNode } from "react";
 
+import type { Route } from "../App";
 import { Brand } from "../pages/LoginPage";
 import type { Me } from "../types/api";
 import { Icon } from "./ui";
 
 /** Cadre de l'application : même barre latérale et même en-tête que index.html. */
-export function Shell({ me, onLogout, children }: { me: Me; onLogout: () => void; children: ReactNode }) {
+const NAV: Record<Route, [string, string]> = {
+  pilote: ["shield", "Pilote"],
+  pilotage: ["target", "Pilotage"],
+  calendrier: ["calendar", "Calendrier"],
+  collaboration: ["chat", "Collaboration"],
+  configuration: ["gear", "Configuration"],
+  licences: ["key", "Licences"],
+  acces: ["user", "Mon accès"],
+};
+
+export function Shell({
+  me,
+  onLogout,
+  routes,
+  route,
+  children,
+}: {
+  me: Me;
+  onLogout: () => void;
+  routes: Route[];
+  route: Route;
+  children: ReactNode;
+}) {
   const initials = me.name
     .split(" ")
     .map((p) => p[0])
@@ -19,16 +42,22 @@ export function Shell({ me, onLogout, children }: { me: Me; onLogout: () => void
         <div className="tenant">
           <span className="dot" />
           <div>
-            <small>Organisation</small>Demo ESN
+            <small>{me.isPlatformAdmin ? "Plateforme" : "Organisation"}</small>
+            {me.tenant?.name ?? "Administration globale"}
           </div>
         </div>
         <nav className="nav" aria-label="Navigation principale">
-          <h6>Administration</h6>
-          {me.isAdmin && (
-            <a href="#configuration" className="on">
-              <Icon name="gear" /> Configuration
+          <h6>{me.isPlatformAdmin ? "Plateforme" : "Mon espace"}</h6>
+          {routes.map((r) => (
+            <a
+              key={r}
+              href={`#${r}`}
+              className={route === r ? "on" : ""}
+              aria-current={route === r ? "page" : undefined}
+            >
+              <Icon name={NAV[r][0]} /> {NAV[r][1]}
             </a>
-          )}
+          ))}
         </nav>
         <div className="rail-foot">
           <span>API sécurisée</span>

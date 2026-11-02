@@ -40,10 +40,13 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match.split("=")[1]) : null;
 }
 
+// Version courante de l'API. L'ancien chemin /api/ sans version reste servi par Django pour les tiers.
+export const API_BASE = "/api/v1";
+
 let csrfReady: Promise<void> | null = null;
 function ensureCsrf(): Promise<void> {
   if (readCookie("csrftoken")) return Promise.resolve();
-  csrfReady ??= fetch("/api/auth/csrf", { credentials: "same-origin" }).then(() => undefined);
+  csrfReady ??= fetch(`${API_BASE}/auth/csrf`, { credentials: "same-origin" }).then(() => undefined);
   return csrfReady;
 }
 
@@ -52,7 +55,7 @@ export async function request<T>(method: string, path: string, body?: unknown): 
   if (unsafe) await ensureCsrf();
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetch(`${API_BASE}${path}`, {
       method,
       credentials: "same-origin",
       headers: {

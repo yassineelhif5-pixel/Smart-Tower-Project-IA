@@ -2,11 +2,13 @@ from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from .capabilities import capabilities_of
 from .models import MODULES, RolePermission
 
 
-def permissions_of(role_id):
-    rows = {p.module: p.as_list() for p in RolePermission.objects.filter(role_id=role_id)}
+def permissions_of(role_id, tenant):
+    """Matrice d'un rôle dans un tenant donné (jamais celle d'un autre tenant)."""
+    rows = {p.module: p.as_list() for p in RolePermission.objects.filter(role_id=role_id, tenant=tenant)} if tenant else {}
     return {module: rows.get(module, [False] * 5) for module, _ in MODULES}
 
 
@@ -23,8 +25,11 @@ class MeSerializer(serializers.Serializer):
             "title": user.title,
             "role": {"code": role.code, "label": role.label} if role else None,
             "isAdmin": user.is_app_admin,
+            "isPlatformAdmin": user.is_platform_admin,
+            "tenant": {"slug": user.tenant.slug, "name": user.tenant.name, "status": user.tenant.status} if user.tenant_id else None,
             "mustChangePassword": user.must_change_password,
-            "permissions": permissions_of(user.role_id) if role else {},
+            "permissions": permissions_of(user.role_id, user.tenant) if role else {},
+            "capabilities": capabilities_of(user) if user.tenant_id else [],
         }
 
 

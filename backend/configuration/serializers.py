@@ -3,7 +3,7 @@ import secrets
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 
-from accounts.models import ADMIN_ROLE, Role
+from accounts.models import ADMIN_ROLE, PLATFORM_ROLE, Role
 from accounts.serializers import validate_new_password
 from projects.models import Client
 
@@ -14,13 +14,20 @@ def temporary_password():
     return secrets.token_urlsafe(12)
 
 
-def active_admin_count():
-    return User.objects.filter(role_id=ADMIN_ROLE, is_active=True).count()
+def active_admin_count(tenant):
+    return User.objects.filter(tenant=tenant, role_id=ADMIN_ROLE, is_active=True).count()
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
-    role = serializers.SlugRelatedField(slug_field="code", queryset=Role.objects.all())
+    # Le rôle Pilote n'est jamais attribuable depuis un tenant ; le client doit appartenir au même tenant.
+    role = serializers.SlugRelatedField(slug_field="code", queryset=Role.objects.exclude(code=PLATFORM_ROLE))
     client = serializers.SlugRelatedField(slug_field="code", queryset=Client.objects.all(), allow_null=True, required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        tenant = getattr(getattr(request, "user", None), "tenant", None)
+        self.fields["client"].queryset = Client.objects.filter(tenant=tenant) if tenant else Client.objects.none()
     password = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=False, max_length=128)
     projectCount = serializers.SerializerMethodField()
     mustChangePassword = serializers.BooleanField(source="must_change_password", read_only=True)
@@ -53,7 +60,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
             if losing_admin and instance.pk == request_user.pk:
                 raise serializers.ValidationError(
                     {"role": "Vous ne pouvez pas retirer votre propre rôle d'administrateur ni désactiver votre compte."})
-            if losing_admin and active_admin_count() <= 1:
+            if losing_admin and active_admin_count(instance.tenant) <= 1:
                 raise serializers.ValidationError({"role": "Il doit rester au moins un administrateur actif."})
         password = data.get("password")
         if password:
@@ -95,9 +102,14 @@ class PermissionsSerializer(serializers.Serializer):
 
 class TokenCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=120)
-    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(is_active=True))
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.none())
     readOnly = serializers.BooleanField(default=True)
     expiresInDays = serializers.IntegerField(min_value=1, max_value=365, required=False, allow_null=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Un jeton ne peut agir qu'au nom d'un compte actif du même tenant.
+        self.fields["user"].queryset = User.objects.filter(is_active=True, tenant=self.context.get("tenant"))
 
 
 class SecretSerializer(serializers.Serializer):

@@ -1,0 +1,11 @@
+# Fichiers inutiles au déploiement Vercel (la démo index.html reste publiée par GitHub Pages).
+index.html
+.nojekyll
+.github/
+supabase/
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*

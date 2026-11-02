@@ -11,12 +11,12 @@ afterEach(() => {
 });
 
 describe("client API", () => {
-  it("n'appelle que /api et envoie le jeton CSRF sur les écritures", async () => {
+  it("n'appelle que /api/v1 et envoie le jeton CSRF sur les écritures", async () => {
     document.cookie = "csrftoken=abc123";
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => json(200, { ok: true }));
     await request("POST", "/admin/users", { username: "x" });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/admin/users");
+    expect(url).toBe("/api/v1/admin/users");
     expect((init as RequestInit).credentials).toBe("same-origin");
     expect(((init as RequestInit).headers as Record<string, string>)["X-CSRFToken"]).toBe("abc123");
   });

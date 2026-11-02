@@ -26,6 +26,19 @@ def get_bool(name, default=False):
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def get_int(name, default, minimum=None):
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        raise ImproperlyConfigured(f"Variable d'environnement invalide : {name} (nombre entier attendu).") from None
+    if minimum is not None and value < minimum:
+        raise ImproperlyConfigured(f"Variable d'environnement invalide : {name} (minimum {minimum}).")
+    return value
+
+
 def get_list(name, default=""):
     return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 

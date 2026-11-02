@@ -2,10 +2,12 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 from accounts.models import ADMIN_ROLE
+from tenants.models import DEFAULT_TENANT_SLUG, Tenant
 
 
 class Command(BaseCommand):
-    help = "Crée le compte initial admin / admin. Le mot de passe devra être changé à la première connexion."
+    help = ("Crée le compte initial admin / admin, administrateur du tenant « Demo ESN ». Le mot de passe devra être "
+            "changé à la première connexion. Pour le Pilote de la plateforme : python manage.py create_pilot.")
 
     def add_arguments(self, parser):
         parser.add_argument("--reset", action="store_true", help="Remet le mot de passe admin et le changement obligatoire.")
@@ -18,6 +20,7 @@ class Command(BaseCommand):
             return
         user = user or User(username="admin", first_name="Administrateur")
         user.role_id = ADMIN_ROLE
+        user.tenant = Tenant.objects.get(slug=DEFAULT_TENANT_SLUG)
         user.is_active = True
         user.must_change_password = True
         # Mot de passe provisoire demandé ; il ne respecte pas les règles de mot de passe,

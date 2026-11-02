@@ -18,7 +18,7 @@ class ApiTokenAuthentication(authentication.BaseAuthentication):
         if len(header) != 2 or not header[1].startswith(TOKEN_PREFIX):
             raise exceptions.AuthenticationFailed("Jeton API invalide.")
         token = ApiToken.objects.select_related("user").filter(token_hash=ApiToken.hash(header[1])).first()
-        if not token or not token.is_valid or not token.user.is_active:
+        if not token or not token.is_valid or not token.user.is_active or token.tenant_id != token.user.tenant_id:
             raise exceptions.AuthenticationFailed("Jeton API invalide, expiré ou révoqué.")
         if token.read_only and request.method not in SAFE_METHODS:
             raise exceptions.PermissionDenied("Ce jeton API est en lecture seule.")
