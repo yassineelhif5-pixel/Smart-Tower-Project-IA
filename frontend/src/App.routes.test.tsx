@@ -15,6 +15,8 @@ const me = (over: Partial<Me>): Me => ({
   role: { code: "dev", label: "Développeur" },
   isAdmin: false,
   isPlatformAdmin: false,
+  isSupport: false,
+  maintenanceEnabled: false,
   tenant: { slug: "acme", name: "Acme", status: "active" },
   mustChangePassword: false,
   permissions: {},

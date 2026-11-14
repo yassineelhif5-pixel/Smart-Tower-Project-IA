@@ -16,7 +16,7 @@ from accounts.permissions import has_perm
 
 from .models import Action, ActionAccess, Project, ProjectAccess
 
-FULL_SCOPE_ROLES = {"admin", "direction"}
+FULL_SCOPE_ROLES = {"direction"}
 
 
 def in_active_tenant(user):
@@ -36,7 +36,11 @@ def visible_projects(user):
     mine = Project.objects.filter(tenant_id=user.tenant_id)
     if has_full_scope(user):
         return mine
-    return mine.filter(accesses__user=user).distinct()
+    scope = Q(accesses__user=user)
+    # Compte client (externe) rattaché à un client : il voit tous les projets de ce client, actuels et futurs.
+    if user.role and not user.role.internal and user.client_id:
+        scope |= Q(client_id=user.client_id)
+    return mine.filter(scope).distinct()
 
 
 def visible_actions(user):
@@ -70,7 +74,7 @@ def has_money(user):
 
 def sees_all_activity(user):
     """ACT_ALL : rôles qui voient les heures des autres (app.sees_all_activity)."""
-    return _ready(user) and user.role_id in {"techlead", "cdp", "client", "admin", "manager", "direction"}
+    return _ready(user) and user.role_id in {"techlead", "cdp", "client", "manager", "direction"}
 
 
 def visible_clients(user):

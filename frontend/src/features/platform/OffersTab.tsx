@@ -40,6 +40,41 @@ const toDraft = (v: OfferVersion | null): Draft => ({
 
 const num = (s: string) => (s.trim() === "" ? null : Number(s));
 
+export const MODULE_GROUPS = [
+  { title: "Modules standard", items: [["project", "Projets"], ["client", "Clients"], ["planning", "Planning"], ["action", "Actions"], ["timesheet", "Saisie de temps"], ["document", "Documents"], ["report", "Reporting"], ["user", "Utilisateurs"], ["settings", "Paramétrage"]] },
+  { title: "Modules supplémentaires", items: [["budget", "Budget"], ["resource", "Ressources"], ["test", "Tests"], ["risk", "Risques"], ["collaboration", "Collaboration"], ["capacity", "Capacité"], ["methodology", "Méthodologie"], ["ocr", "OCR"], ["assistant", "Assistants IA"], ["maintenance", "Maintenance"]] },
+];
+
+export function ModuleChoices({ value, onChange, allowedCodes }: { value: string; onChange: (value: string) => void; allowedCodes?: string[] }) {
+  const selected = value.split(",").map((item) => item.trim()).filter(Boolean);
+  const all = selected.length === 0;
+  const catalogCodes = MODULE_GROUPS.flatMap((group) => group.items.map(([id]) => id));
+  const selectable = allowedCodes ?? catalogCodes;
+  const toggle = (code: string) => {
+    const next = all ? selectable.filter((id) => id !== code)
+      : selected.includes(code) ? selected.filter((id) => id !== code) : [...selected, code];
+    onChange(next.length === selectable.length ? "" : next.join(", "));
+  };
+  return <>
+    <div className="notice" style={{ marginBottom: 10 }}>Une liste vide donne accès à tous les modules disponibles. Les droits du profil utilisateur restent appliqués en plus de l’offre.</div>
+    {MODULE_GROUPS.map((group) => <div key={group.title} style={{ marginBottom: 10 }}>
+      <b>{group.title}</b>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginTop: 8 }}>
+        {group.items.map(([code, label]) => <label key={code} style={{ display: "flex", gap: 8, alignItems: "center", opacity: allowedCodes && !selectable.includes(code) ? 0.45 : 1 }}>
+          <input type="checkbox" checked={all ? selectable.includes(code) : selected.includes(code)} disabled={!!allowedCodes && !selectable.includes(code)} onChange={() => toggle(code)} />{label}
+        </label>)}
+      </div>
+    </div>)}
+    <Field id="v-feat-custom" label="Autres codes de modules" hint="Pour un module ajouté ultérieurement, utilisez son code technique. Séparez les codes par des virgules.">
+      <input id="v-feat-custom" className="inp mono" value={selected.filter((code) => !catalogCodes.includes(code)).join(", ")}
+        onChange={(e) => {
+          const custom = e.target.value.split(",").map((item) => item.trim()).filter(Boolean);
+          onChange([...selected.filter((code) => catalogCodes.includes(code)), ...custom].join(", "));
+        }} />
+    </Field>
+  </>;
+}
+
 const toBody = (d: Draft) => ({
   price: d.price.trim() === "" ? null : d.price,
   currency: d.currency,
@@ -154,13 +189,11 @@ function VersionEditor({
           <input id="v-sess" className="inp num" value={d.maxSessionsPerUser} onChange={f("maxSessionsPerUser")} />
         </Field>
       </div>
-      <Field
-        id="v-feat"
-        label="Fonctionnalités incluses"
-        hint="Codes séparés par des virgules (project, planning, action, budget, resource, document, test, risk, report, delegation…). Vide : toutes."
-      >
-        <input id="v-feat" className="inp mono" value={d.features} onChange={f("features")} />
-      </Field>
+      <div style={{ marginTop: 8, marginBottom: 16 }}>
+        <b>Modules inclus dans cette offre</b>
+        <p className="muted" style={{ margin: "4px 0 10px" }}>Le Pilote décide des modules autorisés par client en affectant une offre. Les profils définissent ensuite les actions autorisées dans chaque module.</p>
+        <ModuleChoices value={d.features} onChange={(value) => setD({ ...d, features: value })} />
+      </div>
       <Field id="v-cond" label="Conditions">
         <textarea id="v-cond" className="inp" rows={3} value={d.conditions} onChange={f("conditions")} />
       </Field>

@@ -6,6 +6,8 @@ import { useApi } from "../../api/useApi";
 import { ErrorNotice, Field, fmtDate, Icon, Loading, Modal, Pill, useAction, useToast } from "../../components/ui";
 import type { Destination, Discussion, DiscussionInput, Message, TeamsKind } from "../../types/collab";
 import { DiscussionMessage } from "./DiscussionMessage";
+import { useFileDrop } from "../../components/DropZone";
+import { uploadProjectFile } from "../files/fileTools";
 
 const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
@@ -89,6 +91,29 @@ function Thread({ discussion, onChanged }: { discussion: Discussion; onChanged: 
   const toast = useToast();
   const end = useRef<HTMLDivElement>(null);
   const teams = discussion.destination !== "internal";
+  const [uploading, setUploading] = useState("");
+  const pick = useRef<HTMLInputElement>(null);
+
+  // Pièces jointes glissées-déposées (ou choisies) : déposées dans les documents du projet puis jointes au message.
+  const attachFiles = async (files: File[]) => {
+    const added: string[] = [];
+    for (const [i, f] of files.entries()) {
+      setUploading(files.length > 1 ? `Envoi ${i + 1}/${files.length} : ${f.name}…` : `Envoi de ${f.name}…`);
+      try {
+        const d = await uploadProjectFile(discussion.project.id, f, { attachment: "1", type: "auto", clientVisible: teams ? "1" : "0" });
+        added.push(d.id);
+      } catch (e) {
+        toast(e instanceof ApiError ? `${f.name} : ${e.message}` : `${f.name} : envoi impossible`, true);
+      }
+    }
+    setUploading("");
+    if (added.length) {
+      docs.reload();
+      setAttachments((cur) => [...new Set([...cur, ...added])]);
+      toast(added.length > 1 ? `${added.length} pièces jointes ajoutées` : "Pièce jointe ajoutée");
+    }
+  };
+  const drop = useFileDrop((fs) => void attachFiles(fs), !discussion.canPost || !!uploading);
 
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "nearest" });
@@ -139,6 +164,7 @@ function Thread({ discussion, onChanged }: { discussion: Discussion; onChanged: 
           </small>
         </div>
         <div className="btns">
+          <AiMembers discussion={discussion} onChanged={() => { messages.reload(); onChanged(); }} />
           {discussion.teamsUrl && (
             <a className="btn sm" href={discussion.teamsUrl} target="_blank" rel="noreferrer noopener">
               Ouvrir dans Teams
@@ -189,7 +215,8 @@ function Thread({ discussion, onChanged }: { discussion: Discussion; onChanged: 
         <div ref={end} />
       </div>
       {discussion.canPost ? (
-        <div className="disc-compose">
+        <div className={`disc-compose dz-target${drop.dragging ? " over" : ""}`} {...drop.bind}>
+          {drop.dragging && <div className="dz-overlay">⬇️ Déposez pour joindre au message</div>}
           {replyTo && (
             <div className="reply-to">
               Réponse à <b>{replyTo.author?.name ?? replyTo.externalAuthor}</b> : {replyTo.body.slice(0, 80)}
@@ -236,6 +263,11 @@ function Thread({ discussion, onChanged }: { discussion: Discussion; onChanged: 
                 </option>
               ))}
             </select>
+            <input ref={pick} type="file" multiple hidden onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; if (fs.length) void attachFiles(fs); }} />
+            <button className="btn ghost" type="button" title="Joindre un fichier depuis l'ordinateur (ou glissez-le sur le message)"
+              disabled={!!uploading} onClick={() => pick.current?.click()}>
+              <Icon name="paperclip" size={14} /> Fichier
+            </button>
             <button className="btn primary" disabled={busy || !body.trim()} onClick={() => void send()}>
               Envoyer
             </button>
@@ -255,13 +287,51 @@ function Thread({ discussion, onChanged }: { discussion: Discussion; onChanged: 
             </div>
           )}
           <small className="muted">
-            Ctrl + Entrée pour envoyer. Dernière synchronisation : {fmtDate(discussion.lastSyncedAt)}
+            {uploading ? `${uploading} · ` : "Glissez des fichiers sur le message pour les joindre · "}Ctrl + Entrée pour envoyer. Dernière synchronisation : {fmtDate(discussion.lastSyncedAt)}
           </small>
         </div>
       ) : (
         <p className="muted">Lecture seule.</p>
       )}
     </section>
+  );
+}
+
+/** Assistants IA de la discussion : le créateur en ajoute ; Maestro analyse la tâche et l'affecte à la bonne IA ou personne. */
+function AiMembers({ discussion, onChanged }: { discussion: Discussion; onChanged: () => void }) {
+  const ai = discussion.ai;
+  const [open, setOpen] = useState(false);
+  const { run, busy } = useAction();
+  if (!ai || !ai.licensed) return null;
+  const add = (code: string) =>
+    void run(() => discussionApi.addAi(discussion.id, code), code === "maestro" ? "Maestro analyse la tâche…" : "Assistant ajouté").then(
+      () => { setOpen(false); onChanged(); }, () => undefined);
+  const remove = (code: string) => void run(() => discussionApi.removeAi(discussion.id, code), "Assistant retiré").then(onChanged, () => undefined);
+  return (
+    <div className="disc-ai">
+      {ai.members.map((m) => (
+        <span key={m.code} className="disc-ai-chip" style={{ ["--mate" as string]: m.color }} title={`${m.name} · ${m.role}`}>
+          {m.avatar} {m.name}
+          {ai.canManage && <button type="button" aria-label={`Retirer ${m.name}`} disabled={busy} onClick={() => remove(m.code)}>×</button>}
+        </span>
+      ))}
+      {ai.canManage && ai.available.length > 0 && (
+        <div className="disc-ai-add">
+          <button type="button" className="btn sm" disabled={busy} onClick={() => setOpen(!open)} aria-expanded={open}>🤖 Ajouter une IA</button>
+          {open && (
+            <div className="disc-ai-menu" role="menu">
+              {ai.available.map((m) => (
+                <button key={m.code} type="button" role="menuitem" disabled={busy} onClick={() => add(m.code)} style={{ ["--mate" as string]: m.color }}>
+                  <span className="disc-ai-ico">{m.avatar}</span>
+                  <span><b>{m.name}</b> <small>{m.role}</small>
+                    <em>{m.code === "maestro" ? "Analyse la tâche et l'affecte automatiquement à la bonne IA ou à la bonne personne." : m.mission}</em></span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

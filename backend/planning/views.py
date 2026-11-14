@@ -34,7 +34,8 @@ def require(user, verb="read"):
 
 
 def user_row(u):
-    return {"id": u.pk, "username": u.username, "name": u.display_name, "team": u.team}
+    return {"id": u.pk, "username": u.username, "name": u.display_name, "team": u.team,
+            "role": u.role.label if getattr(u, "role", None) else ""}
 
 
 def event_row(e, user, now=None):
@@ -310,6 +311,9 @@ class PeopleView(APIView):
         from projects.models import ProjectAccess
         users = get_user_model().objects.filter(tenant=request.user.tenant, is_active=True, role__isnull=False) \
             .exclude(role_id__in=("superadmin", "license_manager")).order_by("first_name", "last_name", "username")
+        if request.query_params.get("internal"):
+            users = users.filter(role__internal=True)
+        users = users.select_related("role")
         project_id = request.query_params.get("project")
         if project_id:
             project = get_object_or_404(visible_projects(request.user), pk=project_id)

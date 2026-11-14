@@ -3,9 +3,12 @@ import { useState } from "react";
 import { ApiError } from "../../api/client";
 import { platformApi } from "../../api/endpoints";
 import { useApi } from "../../api/useApi";
-import { Card, ErrorNotice, Field, fmtDate, Loading, Modal, OneTimeSecret, Pill, useAction } from "../../components/ui";
+import { Card, ErrorNotice, Field, fmtDate, Loading, Modal, OneTimeSecret, Pill, Tabs, useAction } from "../../components/ui";
 import type { CreatedTenant, Offer, TenantRow } from "../../types/api";
 import { fmtDay, KIND_LABEL, REQUEST_LABEL, REQUEST_TONE, SUB_TONE, TENANT_TONE } from "../licensing/labels";
+import { TenantRightsCard } from "./TenantRightsCard";
+import { TenantProfileEditor } from "./TenantProfileEditor";
+import { TenantClientDomains } from "./TenantClientDomains";
 
 const STATUSES: [string, string][] = [
   ["", "Tous les statuts"],
@@ -35,13 +38,24 @@ function CreateTenant({
     name: "",
     adminUsername: "",
     adminEmail: "",
+    offerMode: "catalog",
     offerVersion: "",
+    customOfferName: "Offre personnalisée",
+    licenseModel: "mixed",
+    namedLicenses: "5",
+    concurrentLicenses: "2",
+    maxUsers: "",
+    price: "",
+    billingPeriod: "month",
+    durationDays: "",
+    trialDays: "0",
     contractReference: "",
     endDate: "",
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [created, setCreated] = useState<CreatedTenant | null>(null);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const customLicenses = Number(form.namedLicenses || 0) + Number(form.concurrentLicenses || 0);
   const submit = () =>
     run(
       () =>
@@ -49,7 +63,22 @@ function CreateTenant({
           name: form.name,
           adminUsername: form.adminUsername,
           adminEmail: form.adminEmail,
-          offerVersion: form.offerVersion ? Number(form.offerVersion) : null,
+          offerVersion: form.offerMode === "catalog" && form.offerVersion ? Number(form.offerVersion) : null,
+          ...(form.offerMode === "custom"
+            ? {
+                customOffer: {
+                  name: form.customOfferName,
+                  price: form.price.trim() || null,
+                  billingPeriod: form.billingPeriod,
+                  durationDays: form.durationDays ? Number(form.durationDays) : null,
+                  trialDays: Number(form.trialDays || 0),
+                  licenseModel: form.licenseModel,
+                  maxUsers: form.maxUsers ? Number(form.maxUsers) : null,
+                  namedLicenses: Number(form.namedLicenses || 0),
+                  concurrentLicenses: Number(form.concurrentLicenses || 0),
+                },
+              }
+            : {}),
           contractReference: form.contractReference,
           endDate: form.endDate || null,
         }),
@@ -79,18 +108,24 @@ function CreateTenant({
           provisoire par un canal sûr ; il devra le changer à la première connexion.
         </p>
         <OneTimeSecret label="Mot de passe provisoire." value={created.temporaryPassword} />
+        {form.offerMode === "custom" && <p className="muted">L’offre personnalisée a été créée et activée pour ce client.</p>}
       </Modal>
     );
   return (
     <Modal
       title="Nouvelle entreprise"
       onClose={onClose}
+      wide
       footer={
         <>
           <button className="btn" onClick={onClose}>
             Annuler
           </button>
-          <button className="btn primary" disabled={busy || !form.name || !form.adminUsername} onClick={submit}>
+          <button
+            className="btn primary"
+            disabled={busy || !form.name || !form.adminUsername || (form.offerMode === "custom" && customLicenses < 1)}
+            onClick={submit}
+          >
             Créer l'entreprise
           </button>
         </>
@@ -100,18 +135,79 @@ function CreateTenant({
         <Field id="t-name" label="Nom de l'entreprise" error={errors.name}>
           <input id="t-name" className="inp" value={form.name} onChange={set("name")} />
         </Field>
-        <Field id="t-offer" label="Offre" hint="Sans offre : l'entreprise n'est pas soumise aux licences.">
+        <Field id="t-offer-mode" label="Offre à attribuer">
+          <select id="t-offer-mode" className="inp" value={form.offerMode} onChange={set("offerMode")}>
+            <option value="catalog">Choisir dans le catalogue</option>
+            <option value="custom">Créer une offre personnalisée pour ce client</option>
+          </select>
+        </Field>
+      </div>
+      {form.offerMode === "catalog" ? (
+        <Field id="t-offer" label="Offre publiée" hint="Vous pourrez aussi ajouter une offre plus tard.">
           <select id="t-offer" className="inp" value={form.offerVersion} onChange={set("offerVersion")}>
             <option value="">Aucune pour l'instant</option>
             {publishedVersions(offers).map(({ offer, version }) => (
               <option key={version.id} value={version.id}>
-                {offer.name} v{version.number} · {version.namedLicenses} nominatives, {version.concurrentLicenses}{" "}
-                concurrentes
+                {offer.name} v{version.number} · {version.namedLicenses} nominatives, {version.concurrentLicenses} concurrentes
               </option>
             ))}
           </select>
         </Field>
-      </div>
+      ) : (
+        <>
+          <div className="notice" style={{ margin: "8px 0 12px" }}>
+            Une offre distincte sera créée, publiée et attribuée à ce client pendant sa création. Le Pilote pourra ensuite
+            modifier ou désactiver cette offre depuis le catalogue.
+          </div>
+          <div className="frow">
+            <Field id="t-custom-offer-name" label="Nom de l'offre" error={errors.customOffer}>
+              <input id="t-custom-offer-name" className="inp" value={form.customOfferName} onChange={set("customOfferName")} />
+            </Field>
+            <Field id="t-custom-model" label="Modèle de licences">
+              <select id="t-custom-model" className="inp" value={form.licenseModel}
+                onChange={(e) => setForm({
+                  ...form,
+                  licenseModel: e.target.value,
+                  ...(e.target.value === "named" ? { concurrentLicenses: "0" } : {}),
+                  ...(e.target.value === "concurrent" ? { namedLicenses: "0" } : {}),
+                })}>
+                <option value="named">Nominatives</option>
+                <option value="concurrent">Concurrentes</option>
+                <option value="mixed">Nominatives et concurrentes</option>
+              </select>
+            </Field>
+          </div>
+          <div className="frow">
+            <Field id="t-custom-named" label="Licences nominatives">
+              <input id="t-custom-named" className="inp num" type="number" min={0} value={form.namedLicenses}
+                disabled={form.licenseModel === "concurrent"} onChange={set("namedLicenses")} />
+            </Field>
+            <Field id="t-custom-concurrent" label="Licences concurrentes">
+              <input id="t-custom-concurrent" className="inp num" type="number" min={0} value={form.concurrentLicenses}
+                disabled={form.licenseModel === "named"} onChange={set("concurrentLicenses")} />
+            </Field>
+            <Field id="t-custom-users" label="Utilisateurs actifs maximum" hint="Vide : illimité.">
+              <input id="t-custom-users" className="inp num" type="number" min={1} value={form.maxUsers} onChange={set("maxUsers")} />
+            </Field>
+            <Field id="t-custom-price" label="Prix HT par période" hint="Facultatif.">
+              <input id="t-custom-price" className="inp num" type="number" min={0} step="0.01" value={form.price} onChange={set("price")} />
+            </Field>
+          </div>
+          <div className="frow">
+            <Field id="t-custom-period" label="Facturation">
+              <select id="t-custom-period" className="inp" value={form.billingPeriod} onChange={set("billingPeriod")}>
+                <option value="month">Mensuelle</option><option value="year">Annuelle</option><option value="once">Unique</option>
+              </select>
+            </Field>
+            <Field id="t-custom-duration" label="Durée (jours)" hint="Vide : sans terme.">
+              <input id="t-custom-duration" className="inp num" type="number" min={1} value={form.durationDays} onChange={set("durationDays")} />
+            </Field>
+            <Field id="t-custom-trial" label="Essai (jours)">
+              <input id="t-custom-trial" className="inp num" type="number" min={0} value={form.trialDays} onChange={set("trialDays")} />
+            </Field>
+          </div>
+        </>
+      )}
       <div className="frow">
         <Field id="t-admin" label="Identifiant du premier administrateur" error={errors.adminUsername}>
           <input id="t-admin" className="inp mono" value={form.adminUsername} onChange={set("adminUsername")} />
@@ -120,7 +216,7 @@ function CreateTenant({
           <input id="t-mail" className="inp" type="email" value={form.adminEmail} onChange={set("adminEmail")} />
         </Field>
       </div>
-      {form.offerVersion && (
+      {(form.offerVersion || form.offerMode === "custom") && (
         <div className="frow">
           <Field id="t-ref" label="Référence du contrat (facultatif)">
             <input id="t-ref" className="inp mono" value={form.contractReference} onChange={set("contractReference")} />
@@ -154,6 +250,7 @@ function TenantDetail({
   const [newSub, setNewSub] = useState({ version: "", endDate: "", contractReference: "" });
   const [subChange, setSubChange] = useState({ status: "", endDate: "", reason: "" });
   const [stock, setStock] = useState({ kind: "named", delta: "", reason: "" });
+  const [pane, setPane] = useState<"info" | "domains">("info");
   const refresh = () => {
     tenant.reload();
     sub.reload();
@@ -172,8 +269,14 @@ function TenantDetail({
     <Modal title={t ? `${t.name} · ${t.slug}` : "Entreprise"} onClose={onClose} wide>
       {!t || !s ? (
         <Loading />
+      ) : pane === "domains" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Tabs<"info" | "domains"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"]]} value={pane} onChange={setPane} />
+          <TenantClientDomains tenantId={id} />
+        </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Tabs<"info" | "domains"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"]]} value={pane} onChange={setPane} />
           <div className="kpis">
             <div className="kpi">
               <label>Statut</label>
@@ -245,6 +348,9 @@ function TenantDetail({
               Appliquer
             </button>
           </Card>
+
+          <TenantRightsCard tenantId={id} />
+          <TenantProfileEditor tenant={t} onSaved={refresh} />
 
           <Card
             title="Abonnement"

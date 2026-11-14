@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { adminApi } from "../../api/endpoints";
 import { useApi } from "../../api/useApi";
-import { Card, ErrorNotice, Icon, Loading, useAction } from "../../components/ui";
+import { Card, ErrorNotice, Field, Icon, Loading, Modal, useAction } from "../../components/ui";
 import type { Flags } from "../../types/api";
 
 /** Matrice des droits par rôle, comme l'onglet « Matrice des droits » de index.html, mais appliquée par l'API. */
@@ -10,6 +10,8 @@ export function RightsTab() {
   const roles = useApi(adminApi.roles);
   const [code, setCode] = useState("techlead");
   const [draft, setDraft] = useState<Record<string, Flags> | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [profile, setProfile] = useState({ label: "", question: "", internal: true, money: false, margin: false });
   const { run, busy } = useAction();
 
   if (roles.error) return <ErrorNotice error={roles.error} onRetry={roles.reload} />;
@@ -28,6 +30,19 @@ export function RightsTab() {
       () => undefined,
     );
     setDraft(null);
+    roles.reload();
+  }
+
+  async function createProfile() {
+    if (!profile.label.trim()) return;
+    const created = await run(() => adminApi.createRole({ ...profile, label: profile.label.trim() }), "Profil créé").catch(
+      () => undefined,
+    );
+    if (!created) return;
+    setCode(created.code);
+    setDraft(null);
+    setProfile({ label: "", question: "", internal: true, money: false, margin: false });
+    setCreateOpen(false);
     roles.reload();
   }
 
@@ -60,6 +75,7 @@ export function RightsTab() {
               </option>
             ))}
           </select>
+          <button className="btn" onClick={() => setCreateOpen(true)}>Créer un profil</button>
           <button className="btn primary" onClick={save} disabled={!draft || busy}>
             Enregistrer
           </button>
@@ -108,6 +124,38 @@ export function RightsTab() {
           {role.money ? "budget visible" : "budget masqué"}, {role.margin ? "marges visibles" : "marges masquées"}).
         </div>
       </div>
+      {createOpen && (
+        <Modal
+          title="Créer un profil"
+          onClose={() => setCreateOpen(false)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setCreateOpen(false)}>Annuler</button>
+              <button className="btn primary" onClick={createProfile} disabled={busy || !profile.label.trim()}>
+                Créer le profil
+              </button>
+            </>
+          }
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Field id="profile-label" label="Nom du profil">
+              <input className="inp" id="profile-label" maxLength={60} value={profile.label}
+                onChange={(e) => setProfile({ ...profile, label: e.target.value })} />
+            </Field>
+            <Field id="profile-question" label="Description ou consigne (facultatif)">
+              <input className="inp" id="profile-question" maxLength={200} value={profile.question}
+                onChange={(e) => setProfile({ ...profile, question: e.target.value })} />
+            </Field>
+            <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13 }}><input type="checkbox" checked={profile.internal}
+              onChange={(e) => setProfile({ ...profile, internal: e.target.checked })} /> Profil interne (sinon, accès portail client)</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13 }}><input type="checkbox" checked={profile.money}
+              onChange={(e) => setProfile({ ...profile, money: e.target.checked })} /> Autoriser la visibilité du budget</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13 }}><input type="checkbox" checked={profile.margin}
+              onChange={(e) => setProfile({ ...profile, margin: e.target.checked })} /> Autoriser la visibilité des marges et du chiffre d’affaires</label>
+            <div className="notice">Les droits des modules sont fermés au départ. Après création, sélectionnez les autorisations dans la matrice puis enregistrez-les. Vous pourrez ensuite affecter ce profil aux utilisateurs.</div>
+          </div>
+        </Modal>
+      )}
     </Card>
   );
 }

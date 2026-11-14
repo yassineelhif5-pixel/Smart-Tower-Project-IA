@@ -43,7 +43,8 @@ export const calendarApi = {
   portfolio: () => api.get<PortfolioRow[]>("/calendar/portfolio"),
   settings: () => api.get<CalendarColors>("/calendar/settings"),
   saveSettings: (value: Partial<CalendarColors>) => api.put<CalendarColors>("/calendar/settings", value),
-  people: (project?: string) => api.get<Person[]>(`/calendar/people${qs({ project })}`),
+  people: (project?: string, internal?: boolean) =>
+    api.get<Person[]>(`/calendar/people${qs({ project, internal: internal ? "1" : undefined })}`),
   projects: () => api.get<ProjectRef[]>("/projects"),
   reminders: (id: number) => api.get<Reminder[]>(`/calendar/events/${id}/reminders`),
   addReminder: (id: number, remindAt: string, channel: string) =>
@@ -71,6 +72,8 @@ export const discussionApi = {
   history: (id: number) =>
     api.get<Message & { history: { at: string; body: string; deleted?: boolean }[] }>(`/messages/${id}`),
   retry: (id: number) => api.post<Message>(`/messages/${id}/retry`),
+  addAi: (id: number, code: string) => api.post<Discussion>(`/discussions/${id}/ai`, { code }),
+  removeAi: (id: number, code: string) => api.delete<Discussion>(`/discussions/${id}/ai?code=${encodeURIComponent(code)}`),
   synchronize: (id: number) =>
     api.post<{ created: number; updated: number; deleted: number }>(`/discussions/${id}/synchronize`),
 };
@@ -91,6 +94,7 @@ export const teamsApi = {
   saveAdmin: (input: Partial<TeamsConnectorSettings> & { clientSecret?: string }) =>
     api.put<TeamsConnectorSettings>("/admin/teams", input),
   check: () => api.post<TeamsConnectorSettings & { ok: boolean; message: string }>("/admin/teams/check"),
+  assignedConnectors: () => api.get<{ code: string; label: string }[]>("/admin/connectors"),
 };
 
 export const preferencesApi = {

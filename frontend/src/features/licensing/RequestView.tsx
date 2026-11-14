@@ -12,7 +12,8 @@ export function RequestView({ request, children }: { request: LicenseRequest; ch
         <Pill tone={REQUEST_TONE[request.status]}>{REQUEST_LABEL[request.status]}</Pill> <b>{request.kindLabel}</b>
         {request.quantity !== null && <> · {request.quantity} demandée(s)</>}
         {request.quantityGranted !== null && <> · {request.quantityGranted} accordée(s)</>}
-        {request.targetOffer && <> · offre souhaitée : {request.targetOffer.name}</>}
+        {request.targetVersion && <> · offre souhaitée : {request.targetVersion.offer} v{request.targetVersion.number}</>}
+        {!request.targetVersion && request.targetOffer && <> · offre souhaitée : {request.targetOffer.name}</>}
       </div>
       <div className="notice">{request.justification}</div>
       <div className="tbl-wrap">

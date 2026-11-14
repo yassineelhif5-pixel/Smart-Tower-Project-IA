@@ -1,0 +1,80 @@
+.bud { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.bud-h { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.bud-h h3 { margin: 0; font-size: 16px; }
+.bud-h small, .bud-period { color: var(--muted); font-size: 12.5px; }
+.bud-period { margin: 0; }
+.bud-period b { color: var(--ink); }
+.bud-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.bud-kpi { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; }
+.bud-kpi label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 700; }
+.bud-kpi strong { font-size: 21px; color: var(--ink); }
+.bud-kpi small { color: var(--muted); font-size: 12px; }
+.bud-kpi.acc { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
+.bud-kpi.ok strong { color: var(--ok); } .bud-kpi.warn strong { color: var(--warn); } .bud-kpi.crit strong { color: var(--crit); }
+.bud-kpi.crit { background: var(--crit-soft); }
+.bud-gauge { height: 10px; border-radius: 99px; background: var(--sunken); display: flex; overflow: hidden; }
+.bud-gauge i { display: block; height: 100%; }
+.bud-gauge .c, .bud-bar .c { background: var(--accent); }
+.bud-gauge .e, .bud-bar .e { background: color-mix(in srgb, var(--accent) 35%, var(--surface)); }
+.bud-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bud-filters select.inp { width: auto; }
+.bud-seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 999px; overflow: hidden; flex-wrap: wrap; }
+.bud-seg button { border: 0; background: transparent; padding: 6px 11px; font-size: 12.5px; cursor: pointer; color: var(--ink-2); font-weight: 600; }
+.bud-seg button.on { background: var(--accent); color: var(--accent-ink); }
+.bud-dates { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.bud-dates input { width: auto; }
+.bud-charts { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; }
+.bud-charts > div:first-child { grid-row: span 2; }
+@media (max-width: 1000px) { .bud-charts { grid-template-columns: 1fr; } .bud-charts > div:first-child { grid-row: auto; } }
+.bud-charts h4 { margin: 0 0 6px; font-size: 13px; color: var(--ink-2); }
+.bud-svg { width: 100%; height: auto; }
+.bud-svg .grid { stroke: var(--line); }
+.bud-svg .ax { fill: var(--muted); font-size: 11px; }
+.bud-svg .c { fill: var(--accent); }
+.bud-svg .e { fill: color-mix(in srgb, var(--accent) 35%, var(--surface)); }
+.bud-svg .cum { fill: none; stroke: var(--warn); stroke-width: 2.5; }
+.bud-svg .cum-d { fill: var(--warn); }
+.bud-svg .bdg { stroke: var(--crit); stroke-dasharray: 6 5; stroke-width: 1.5; }
+.bud-svg .bdg-t { fill: var(--crit); font-size: 11px; }
+.bud-svg .leg text { fill: var(--ink-2); font-size: 11px; }
+.bud-bars { display: flex; flex-direction: column; gap: 6px; }
+.bud-bar { display: grid; grid-template-columns: minmax(90px, 160px) 1fr auto auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.bud-bar > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+.bud-bar > div { display: flex; height: 12px; border-radius: 99px; background: var(--sunken); overflow: hidden; }
+.bud-bar i { display: block; height: 100%; }
+.bud-bar small { color: var(--muted); }
+.bud-tables { display: flex; flex-direction: column; gap: 14px; overflow-x: auto; }
+.bud-tables .num { text-align: right; font-variant-numeric: tabular-nums; }
+.bud-warn { color: var(--warn); font-weight: 600; }
+.bud-alert { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--warn-soft); font-size: 13px; }
+.bud-missing { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); }
+.bud-missing.warn { background: var(--warn-soft); } .bud-missing.ok { background: var(--ok-soft); }
+.bud-missing > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.bud-sent { color: var(--ok); }
+.bud-settings { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 10px; }
+.bud-settings label { display: inline-flex; align-items: center; gap: 6px; }
+.bud-num { width: 56px !important; padding: 2px 6px; }
+.bud-svg .ax-cum { fill: var(--warn); }
+.bud-extra { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--surface-2); }
+.bud-extra > div { display: flex; flex-direction: column; gap: 3px; font-size: 13px; flex: 1 1 320px; }
+.bud-extra small { color: var(--muted); font-size: 12px; }
+.bud-extra ul { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.bud-extra-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.bud-extra-form .inp { width: auto; min-width: 120px; }
+.bud-extra-form .inp:nth-child(2) { min-width: 240px; }
+.bud-req { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+.bud-req.pending { border-color: var(--info); background: var(--info-soft); }
+.bud-req.suggest { border-color: var(--warn); background: var(--warn-soft); }
+.bud-req-main { display: flex; flex-direction: column; gap: 4px; font-size: 13px; flex: 1 1 340px; }
+.bud-req-main p { margin: 0; }
+.bud-req-main small { color: var(--muted); }
+.bud-req-btns { display: flex; gap: 6px; }
+
+.bud-orders{border:1px solid var(--line,#e3e6ee);border-radius:10px;padding:12px 14px;margin:12px 0;display:flex;flex-direction:column;gap:8px}
+.bud-orders-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.bud-mode{display:flex;align-items:center;gap:6px;font-size:13px}
+.bud-inline{display:inline-flex;gap:6px;align-items:center}
+.bud-chip{font-size:12px;padding:2px 8px;border-radius:10px;background:#eef1f6}
+.bud-chip.pending{background:#fff4dc;color:#8a5a00}.bud-chip.ok{background:#e3f6ea;color:#1d7a3f}.bud-chip.ko{background:#fde8e8;color:#a52a2a}
+.bud-policy{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line,#e3e6ee)}

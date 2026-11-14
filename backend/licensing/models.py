@@ -13,6 +13,8 @@ Distinctions du cahier des charges :
 
 Aucun tarif ni quota n'est écrit dans le code : tout est en base et modifiable par le Pilote.
 """
+import uuid
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -99,6 +101,7 @@ class Subscription(models.Model):
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="subscriptions")
     contract = models.ForeignKey(Contract, on_delete=models.PROTECT, null=True, blank=True, related_name="subscriptions")
     offer_version = models.ForeignKey(OfferVersion, on_delete=models.PROTECT, related_name="subscriptions")
+    module_features = models.JSONField(null=True, blank=True, help_text="Modules limités pour une activation par voucher ; null = modules de la version d'offre")
     status = models.CharField(max_length=10, choices=SUB_STATUSES, default=ACTIVE)
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True, help_text="Vide = sans terme")
@@ -188,8 +191,88 @@ REQUEST_KINDS = [("named", "Licences nominatives supplémentaires"), ("concurren
                  ("quota", "Augmentation de quota"), ("offer", "Évolution d'offre"), ("option", "Option contractuelle")]
 DRAFT, SUBMITTED, UNDER_REVIEW, INFO_REQUIRED = "DRAFT", "SUBMITTED", "UNDER_REVIEW", "ADDITIONAL_INFORMATION_REQUIRED"
 APPROVED, PARTIALLY_APPROVED, REJECTED, CANCELLED_R, FULFILLED = "APPROVED", "PARTIALLY_APPROVED", "REJECTED", "CANCELLED", "FULFILLED"
+INSTALLED = "INSTALLED"
 REQUEST_STATUSES = [(s, s) for s in (DRAFT, SUBMITTED, UNDER_REVIEW, INFO_REQUIRED, APPROVED, PARTIALLY_APPROVED,
-                                     REJECTED, CANCELLED_R, FULFILLED)]
+                                     REJECTED, CANCELLED_R, FULFILLED, INSTALLED)]
+
+
+class OfferVoucher(models.Model):
+    """Code d'activation à usage unique. Seule son empreinte est conservée en base."""
+
+    batch_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    offer_version = models.ForeignKey(OfferVersion, on_delete=models.PROTECT, related_name="vouchers")
+    features = models.JSONField(null=True, blank=True, help_text="Sélection de modules propre à ce code ; null = modules de l'offre")
+    code_hash = models.CharField(max_length=64, unique=True)
+    code_hint = models.CharField(max_length=8)
+    target_tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, null=True, blank=True, related_name="offer_vouchers")
+    request = models.ForeignKey("licensing.LicenseRequest", on_delete=models.SET_NULL, null=True, blank=True, related_name="vouchers")
+    created_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, related_name="created_offer_vouchers")
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    redeemed_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="redeemed_offer_vouchers")
+    redeemed_tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, null=True, blank=True, related_name="redeemed_offer_vouchers")
+    redeemed_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="revoked_offer_vouchers")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "id"]
+
+
+class MaintenanceEntitlement(models.Model):
+    tenant = models.OneToOneField("tenants.Tenant", on_delete=models.CASCADE, related_name="maintenance_entitlement")
+    enabled = models.BooleanField(default=False)
+    plan = models.CharField(max_length=80, default="Maintenance Control Tower")
+    starts_at = models.DateField(null=True, blank=True)
+    ends_at = models.DateField(null=True, blank=True)
+    assigned_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, related_name="maintenance_grants")
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class SupportRequest(models.Model):
+    STATUSES = [("new", "Nouvelle"), ("triaged", "À traiter"), ("in_progress", "En cours"), ("resolved", "Résolue"), ("closed", "Clôturée")]
+    CATEGORIES = [("maintenance", "Maintenance"), ("assistance", "Assistance"), ("incident", "Incident"), ("question", "Question")]
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE, related_name="support_requests")
+    requester = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, related_name="support_requests")
+    title = models.CharField(max_length=180)
+    description = models.TextField(max_length=10000)
+    category = models.CharField(max_length=16, choices=CATEGORIES, default="assistance")
+    status = models.CharField(max_length=16, choices=STATUSES, default="new")
+    assigned_to = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_support_requests")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    ai_status = models.CharField(max_length=16, default="pending", choices=[("pending", "En attente"), ("ready", "Analyse prête"), ("unavailable", "IA non configurée"), ("error", "Erreur IA")])
+    ai_analysis = models.TextField(blank=True)
+    ai_reply = models.TextField(blank=True)
+    ai_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class SupportAIConfig(models.Model):
+    """Configuration globale de THOR. La clé du fournisseur reste chiffrée au repos."""
+    enabled = models.BooleanField(default=False)
+    model = models.CharField(max_length=120, default="gpt-4o-mini")
+    token_limit = models.PositiveIntegerField(default=800)
+    api_key_ciphertext = models.TextField(blank=True)
+    api_key_hint = models.CharField(max_length=4, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def current(cls):
+        row, _ = cls.objects.get_or_create(pk=1)
+        return row
+
+    def set_api_key(self, value):
+        from configuration import crypto
+        self.api_key_ciphertext = crypto.encrypt(value) if value else ""
+        self.api_key_hint = value[-4:] if len(value) >= 8 else ""
+
+    def get_api_key(self):
+        from configuration import crypto
+        return crypto.decrypt(self.api_key_ciphertext) if self.api_key_ciphertext else ""
 
 
 class LicenseRequest(models.Model):
@@ -198,6 +281,7 @@ class LicenseRequest(models.Model):
     quantity = models.PositiveIntegerField(null=True, blank=True)
     quantity_granted = models.PositiveIntegerField(null=True, blank=True)
     target_offer = models.ForeignKey(Offer, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    target_version = models.ForeignKey(OfferVersion, on_delete=models.PROTECT, null=True, blank=True, related_name="offer_requests")
     justification = models.TextField(blank=True)
     status = models.CharField(max_length=32, choices=REQUEST_STATUSES, default=DRAFT)
     created_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, related_name="+")

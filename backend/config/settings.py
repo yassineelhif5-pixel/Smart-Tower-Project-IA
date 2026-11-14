@@ -5,13 +5,14 @@ Le démarrage échoue avec un message explicite si un paramètre obligatoire man
 """
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 from django.core.exceptions import ImproperlyConfigured
 
 from . import env
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = env.get("DJANGO_SECRET_KEY", required=True)
 DEBUG = env.get_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = env.get_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
@@ -44,6 +45,17 @@ CRON_SECRET = env.get("CRON_SECRET", "")
 # Microsoft et les notifications de modification Microsoft Graph. Vide : déduite de la requête, sans webhook.
 PUBLIC_BASE_URL = env.get("PUBLIC_BASE_URL", "").rstrip("/")
 
+# Configuration SMTP proposée par défaut à chaque entreprise (canal e-mail de Configuration › Notifications).
+# Ce ne sont que des valeurs de départ : l'administrateur les modifie dans l'interface. Le mot de passe (clé SMTP)
+# n'est jamais ici : il se saisit dans l'interface et est stocké chiffré (ServiceSecret « smtp_password »).
+DEFAULT_SMTP_SETTINGS = {
+    "host": env.get("DEFAULT_SMTP_HOST", "smtp-relay.brevo.com"),
+    "port": int(env.get("DEFAULT_SMTP_PORT", "587") or 587),
+    "security": env.get("DEFAULT_SMTP_SECURITY", "starttls"),
+    "username": env.get("DEFAULT_SMTP_USERNAME", ""),
+    "from_address": env.get("DEFAULT_SMTP_FROM", ""),
+}
+
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -58,6 +70,8 @@ INSTALLED_APPS = [
     "planning",
     "collaboration",
     "methodology",
+    "aicalls",
+    "clientspace",
 ]
 
 MIDDLEWARE = [
@@ -93,6 +107,9 @@ if "test" in sys.argv and "supabase" in DATABASES["default"]["HOST"]:
     )
 
 AUTH_USER_MODEL = "accounts.User"
+# Lien « mot de passe oublié » : valable une heure.
+PASSWORD_RESET_TIMEOUT = 3600
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
@@ -136,7 +153,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
-    "DEFAULT_THROTTLE_RATES": {"login": "10/min"},
+    "DEFAULT_THROTTLE_RATES": {"login": "10/min", "voucher_redeem": "5/min", "sso_start": "10/min", "password_reset": "5/min"},
     "UNAUTHENTICATED_USER": "django.contrib.auth.models.AnonymousUser",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
@@ -159,3 +176,14 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": env.get("DJANGO_LOG_LEVEL", "INFO")},
 }
+
+
+
+# Envoi d'e-mails par le Pilote (relances de contrat) : serveur SMTP de la plateforme, facultatif.
+# Sans PLATFORM_EMAIL_HOST, la relance est notifiée dans l'application et proposée dans la messagerie du Pilote.
+PLATFORM_EMAIL_HOST = env.get("PLATFORM_EMAIL_HOST", "")
+PLATFORM_EMAIL_PORT = env.get_int("PLATFORM_EMAIL_PORT", 587, minimum=1)
+PLATFORM_EMAIL_USER = env.get("PLATFORM_EMAIL_USER", "")
+PLATFORM_EMAIL_PASSWORD = env.get("PLATFORM_EMAIL_PASSWORD", "")
+PLATFORM_EMAIL_SECURITY = env.get("PLATFORM_EMAIL_SECURITY", "starttls")
+PLATFORM_EMAIL_FROM = env.get("PLATFORM_EMAIL_FROM", "")

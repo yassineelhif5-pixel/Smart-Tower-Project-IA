@@ -4,6 +4,7 @@ from datetime import date
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from configuration import audit
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -155,7 +156,16 @@ class AllocationListView(MView):
         if u is None:
             raise ApiError("VALIDATION_ERROR", "Choisissez un collaborateur.")
         if not visible_projects(u).filter(pk=p.pk).exists():
-            raise ApiError("VALIDATION_ERROR", "Ce collaborateur n'a pas accès au projet : donnez-lui d'abord l'accès.")
+            # Le chef de projet (ou qui gère l'équipe) ajoute directement le collaborateur à l'équipe du projet.
+            from projects.models import ProjectAccess
+            from projects.workspace import _rights
+            if not _rights(request.user, p)["canManageTeam"]:
+                raise ApiError("VALIDATION_ERROR", "Ce collaborateur n'a pas accès au projet : demandez au chef de projet de l'ajouter à l'équipe.")
+            if not (u.role and u.role.internal):
+                raise ApiError("VALIDATION_ERROR", "Seuls les collaborateurs internes ont une capacité sur le projet.")
+            ProjectAccess.objects.get_or_create(tenant=p.tenant, project=p, user=u,
+                                                defaults={"can_edit": False, "granted_by": request.user})
+            audit.record(request.user, f"Projet {p.code}", "Ressource affectée (capacité)", "", u.display_name, tenant=p.tenant)
         a, _ = TeamMemberAllocation.objects.get_or_create(project=p, user=u, defaults={"tenant": p.tenant})
         return Response(allocation_row(save_allocation(a, request.data)), status=status.HTTP_201_CREATED)
 
@@ -296,7 +306,19 @@ class PhaseListView(MView):
         S.require(request.user, p, "read")
         from planning.models import CalendarEvent
         milestones = CalendarEvent.objects.filter(project=p, kind="milestone").order_by("start")
-        return Response({"phases": [phase_row(ph) for ph in VPhase.objects.filter(project=p).select_related("owner")],
+        from projects.workspace import live_phases
+        phases = list(VPhase.objects.filter(project=p).select_related("owner"))
+        live = live_phases(p, phases)
+        labels = dict(VPhase._meta.get_field("status").choices)
+        rows = []
+        for ph in phases:
+            row = phase_row(ph)
+            lv = live[ph.pk]
+            row.update({"manualProgress": ph.progress, "manualStatus": ph.status, "progress": lv["progress"],
+                        "status": lv["status"], "statusLabel": labels.get(lv["status"], lv["status"]),
+                        "tasks": lv["tasks"], "tasksDone": lv["done"], "live": lv["live"], "blocked": lv.get("blocked", 0)})
+            rows.append(row)
+        return Response({"phases": rows,
                          "milestones": [{"id": e.pk, "title": e.title, "date": e.start.date(), "status": e.status,
                                          "phase": e.phase} for e in milestones]})
 

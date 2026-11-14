@@ -15,6 +15,7 @@ import {
   useGuarded,
 } from "../../features/methodology/shared";
 import type { WeekData } from "../../types/methodology";
+import { WeekActions } from "../../features/planning/WeekActions";
 import type { PageProps } from "./types";
 
 export const mondayIso = (d = new Date()) => {
@@ -153,6 +154,7 @@ export function WeeklyPlanningPage({ info }: PageProps) {
               </p>
             </Card>
           )}
+          <WeekActions projectId={id} week={week} />
           <VCycleOverview phases={phases.data} />
           <AssistPanel
             projectId={id}

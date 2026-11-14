@@ -10,6 +10,7 @@ export interface Person {
   username: string;
   name: string;
   team?: string;
+  role?: string;
 }
 
 export interface Assignment {
@@ -205,9 +206,13 @@ export interface Discussion {
   private: boolean;
   participants: (Person & { role: string })[];
   canPost: boolean;
+  ai?: DiscussionAi;
   messageCount?: number;
   failedCount?: number;
 }
+
+export interface AiMate { code: string; name: string; role: string; avatar: string; color: string; mission?: string }
+export interface DiscussionAi { licensed: boolean; canManage: boolean; members: AiMate[]; available: AiMate[] }
 
 export interface DiscussionInput {
   project: string;
@@ -241,6 +246,7 @@ export interface Message {
   mine: boolean;
   canEdit: boolean;
   canRetry: boolean;
+  ai?: AiMate | null;
 }
 
 export interface TeamsStatus {

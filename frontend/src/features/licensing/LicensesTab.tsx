@@ -9,6 +9,20 @@ import { RequestView } from "./RequestView";
 
 const can = (caps: string[], code: string) => caps.includes(code);
 
+function VoucherRedemption({ caps }: { caps: string[] }) {
+  const { run, busy } = useAction();
+  const [code, setCode] = useState("");
+  const [message, setMessage] = useState("");
+  if (!can(caps, "licenses.assign")) return null;
+  return <Card title="Activer une offre reçue" sub="Imputez ici le voucher envoyé par le Pilote. Le code est réservé à votre entreprise et ne fonctionne qu'une seule fois.">
+    <div className="frow" style={{ alignItems: "end" }}>
+      <Field id="tenant-voucher" label="Code d’activation"><input id="tenant-voucher" className="inp mono" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} /></Field>
+      <button className="btn primary" disabled={busy || !code.trim()} onClick={() => run(() => licensingApi.redeemVoucher(code.trim()), "Offre activée").then((result) => { if (result) { setMessage(`${result.offer} v${result.version} est activée pour ${result.tenant}.`); setCode(""); } }, () => undefined)}>Imputer le voucher</button>
+    </div>
+    {message && <div className="notice" role="status">{message}</div>}
+  </Card>;
+}
+
 function Overview() {
   const o = useApi(licensingApi.overview);
   if (o.error) return <ErrorNotice error={o.error} onRetry={o.reload} />;
@@ -298,13 +312,13 @@ function Requests({ caps }: { caps: string[] }) {
     open: boolean;
     kind: string;
     quantity: string;
-    targetOffer: string;
+    targetVersion: string;
     justification: string;
   }>({
     open: false,
     kind: "named",
     quantity: "",
-    targetOffer: "",
+    targetVersion: "",
     justification: "",
   });
   const [openId, setOpenId] = useState<number | null>(null);
@@ -372,7 +386,7 @@ function Requests({ caps }: { caps: string[] }) {
                 busy ||
                 !form.justification ||
                 (withQuantity && !form.quantity) ||
-                (form.kind === "offer" && !form.targetOffer)
+                (form.kind === "offer" && !form.targetVersion)
               }
               onClick={() =>
                 run(
@@ -380,13 +394,13 @@ function Requests({ caps }: { caps: string[] }) {
                     licensingApi.createRequest({
                       kind: form.kind,
                       quantity: withQuantity ? Number(form.quantity) : null,
-                      targetOffer: form.kind === "offer" ? Number(form.targetOffer) : null,
+                      targetVersion: form.kind === "offer" ? Number(form.targetVersion) : null,
                       justification: form.justification,
                     }),
                   "Demande envoyée au Pilote",
                 ).then(
                   () => {
-                    setForm({ open: false, kind: "named", quantity: "", targetOffer: "", justification: "" });
+                    setForm({ open: false, kind: "named", quantity: "", targetVersion: "", justification: "" });
                     list.reload();
                   },
                   () => undefined,
@@ -429,13 +443,14 @@ function Requests({ caps }: { caps: string[] }) {
                 <select
                   id="rq-o"
                   className="inp"
-                  value={form.targetOffer}
-                  onChange={(e) => setForm({ ...form, targetOffer: e.target.value })}
+                  value={form.targetVersion}
+                  onChange={(e) => setForm({ ...form, targetVersion: e.target.value })}
                 >
                   <option value="">Choisir…</option>
                   {(offers.data ?? []).map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
+                    <option key={o.version.id} value={o.version.id}>
+                      {o.name} v{o.version.number} · {o.version.namedLicenses} nominatives, {o.version.concurrentLicenses} concurrentes
+                      {o.version.price !== null ? ` · ${o.version.price} ${o.version.currency} / ${o.version.billingPeriod}` : " · prix à définir"}
                     </option>
                   ))}
                 </select>
@@ -506,6 +521,7 @@ function Requests({ caps }: { caps: string[] }) {
 export function LicensesTab({ capabilities }: { capabilities: string[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <VoucherRedemption caps={capabilities} />
       {can(capabilities, "licenses.view") && (
         <>
           <Overview />

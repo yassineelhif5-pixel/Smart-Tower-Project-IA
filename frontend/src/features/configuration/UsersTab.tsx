@@ -97,12 +97,13 @@ export function UsersTab({ me }: { me: Me }) {
                     <small className="muted mono">
                       {u.username}
                       {u.email && ` · ${u.email}`}
+                      {` · ${u.authMode === "sso" ? "SSO uniquement" : u.authMode === "standard" ? "Standard" : "Standard + SSO"}`}
                     </small>
                   </td>
                   <td>
                     {u.role === "admin" ? <Pill tone="acc">{roleLabel[u.role]}</Pill> : (roleLabel[u.role] ?? u.role)}
                   </td>
-                  <td className="r mono">{["admin", "direction"].includes(u.role) ? "tous" : u.projectCount}</td>
+                  <td className="r mono">{u.role === "direction" ? "tous" : u.projectCount}</td>
                   <td className="muted">{fmtDate(u.lastLogin)}</td>
                   <td>
                     {!u.isActive ? (
@@ -140,6 +141,7 @@ export function UsersTab({ me }: { me: Me }) {
         <UserForm
           user={editing.mode === "edit" ? editing.user : null}
           roles={roles.data.roles}
+          tenantName={me.tenant?.name ?? "Entreprise administrée"}
           isSelf={editing.mode === "edit" && editing.user.id === me.id}
           onClose={() => setEditing(null)}
           onSaved={(temporary, username) => {
@@ -170,6 +172,7 @@ export function UsersTab({ me }: { me: Me }) {
             </button>
           }
         >
+          <div className="callout ok" style={{ marginBottom: 10 }}>✓ Mot de passe réinitialisé et enregistré. Identifiant de connexion : <b className="mono">{secret.user}</b></div>
           <OneTimeSecret label="Mot de passe provisoire." value={secret.value} />
           <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
             Transmettez-le par un canal sûr. L'utilisateur devra en choisir un nouveau à sa première connexion.
@@ -183,12 +186,14 @@ export function UsersTab({ me }: { me: Me }) {
 function UserForm({
   user,
   roles,
+  tenantName,
   isSelf,
   onClose,
   onSaved,
 }: {
   user: AdminUser | null;
   roles: Role[];
+  tenantName: string;
   isSelf: boolean;
   onClose: () => void;
   onSaved: (temporary: string | null, username: string) => void;
@@ -251,6 +256,7 @@ function UserForm({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {!user && <div className="notice">Ce compte sera automatiquement rattaché à votre entreprise <b>{tenantName}</b> et apparaîtra dans la liste des utilisateurs que vous gérez.</div>}
         <div className="frow">
           <Field id="u_first" label="Prénom" error={errors.firstName}>
             <input
@@ -298,7 +304,7 @@ function UserForm({
               isSelf
                 ? "Vous ne pouvez pas retirer votre propre rôle d'administrateur."
                 : role?.code === "admin"
-                  ? "Accès au module Configuration et à tous les projets."
+                  ? "Accès à la Configuration ; les projets restent limités aux projets attribués à ce compte."
                   : undefined
             }
           >
@@ -334,6 +340,14 @@ function UserForm({
             </Field>
           )}
         </div>
+        <Field id="u-auth-mode" label="Mode d’accès">
+          <select id="u-auth-mode" className="inp" value={form.authMode ?? "both"}
+            onChange={(e) => set("authMode", e.target.value as UserInput["authMode"])}>
+            <option value="standard">Standard · identifiant et mot de passe</option>
+            <option value="sso">SSO uniquement</option>
+            <option value="both">Standard et SSO</option>
+          </select>
+        </Field>
         <div className="frow">
           <Field id="u_title" label="Fonction" error={errors.title}>
             <input

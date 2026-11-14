@@ -163,7 +163,9 @@ def visible_discussions(user):
     public = Q(project__in=visible_projects(user)) & ~Q(teams_kind__in=("oneOnOne", "group")) \
         & (Q(action__isnull=True) | Q(action__in=visible_actions(user)))
     private = Q(teams_kind__in=("oneOnOne", "group"), participants__user=user)
-    return base.filter(public | private).distinct()
+    connector_allowed = Q(teams_kind="none") | Q(project__connector_grants__connector="teams",
+                                                     project__connector_grants__enabled=True)
+    return base.filter(connector_allowed & (public | private)).distinct()
 
 
 def can_post(user, discussion):
@@ -254,6 +256,8 @@ def _create_discussion(by, data):
     destination = data.get("destination", "internal")
     if destination not in ("internal", "teams", "both"):
         raise CollabError("VALIDATION_ERROR", "Destination inconnue (internal, teams, both).")
+    if destination in ("teams", "both") and not project.connector_grants.filter(connector="teams", enabled=True).exists():
+        raise CollabError("CONNECTOR_NOT_ASSIGNED", "Le Pilote n'a pas attribué Microsoft Teams à ce projet.", 403)
     kind = data.get("teamsKind") or ("none" if destination == "internal" else "group")
     if destination == "internal":
         kind = "none"
@@ -387,6 +391,12 @@ def post_message(by, discussion, data):
                f"{discussion.title} : {body[:200]}")
     notify("discussion_message", [u for u in recipients.values() if u not in mentions],
            f"Nouveau message : {discussion.title}", f"{by.display_name} : {body[:200]}")
+    if discussion.ai_members:  # les assistants IA présents répondent ; une panne IA ne bloque jamais le message humain
+        try:
+            from . import ai
+            ai.on_message(discussion, msg, by)
+        except Exception:
+            logger.warning("Réponse IA de discussion impossible", exc_info=True)
     return msg
 
 

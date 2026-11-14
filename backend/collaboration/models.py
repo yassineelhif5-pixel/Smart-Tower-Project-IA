@@ -17,8 +17,29 @@ from django.db.models import Q
 
 from configuration import crypto
 from tenants.models import TenantOwned
+from projects.models import Project
 
 USER = settings.AUTH_USER_MODEL
+
+CONNECTOR_CATALOG = [
+    ("mpp", "Microsoft Project"), ("monday", "monday.com"), ("jira", "Jira"),
+    ("servicenow", "ServiceNow"), ("crm", "CRM"), ("azure_devops", "Azure DevOps"),
+    ("teams", "Microsoft Teams"), ("slack", "Slack"),
+]
+
+
+class ProjectConnectorGrant(TenantOwned):
+    """Connecteur autorisé par le Pilote pour un projet donné."""
+
+    tenant_source = "project"
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="connector_grants")
+    connector = models.CharField(max_length=24, choices=CONNECTOR_CATALOG)
+    enabled = models.BooleanField(default=True)
+    assigned_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, related_name="project_connector_grants")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["project", "connector"], name="uniq_project_connector_grant")]
 
 
 class TeamsConnector(TenantOwned):
@@ -100,6 +121,7 @@ class ProjectDiscussion(TenantOwned):
     created_at = models.DateTimeField(auto_now_add=True)
     last_message_at = models.DateTimeField(null=True, blank=True)
     last_synced_at = models.DateTimeField(null=True, blank=True)
+    ai_members = models.JSONField(default=list, blank=True, help_text="Assistants IA ajoutés à la discussion (codes)")
 
     class Meta:
         ordering = ["-last_message_at", "-id"]
@@ -153,6 +175,7 @@ class DiscussionMessage(TenantOwned):
     teams_message_id = models.CharField(max_length=64, blank=True)
     teams_modified_at = models.DateTimeField(null=True, blank=True)
     client_key = models.CharField(max_length=64, blank=True, help_text="Clé d'idempotence fournie par le navigateur")
+    ai_author = models.CharField(max_length=20, blank=True, help_text="Code de l'assistant IA auteur du message")
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

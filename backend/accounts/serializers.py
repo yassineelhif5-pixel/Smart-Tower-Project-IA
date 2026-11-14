@@ -12,11 +12,24 @@ def permissions_of(role_id, tenant):
     return {module: rows.get(module, [False] * 5) for module, _ in MODULES}
 
 
+def _tenants(user):
+    try:
+        from .tenant_switch import tenants_of
+        return tenants_of(user)
+    except Exception:  # noqa: BLE001 — table pas encore migrée
+        return []
+
+
 class MeSerializer(serializers.Serializer):
     """Profil de l'utilisateur connecté : ce que l'interface a besoin de savoir, rien de plus."""
 
     def to_representation(self, user):
         role = user.role
+        if user.tenant_id:
+            from licensing.services import maintenance_enabled
+            maintenance = maintenance_enabled(user.tenant)
+        else:
+            maintenance = False
         return {
             "id": user.id,
             "username": user.username,
@@ -26,10 +39,14 @@ class MeSerializer(serializers.Serializer):
             "role": {"code": role.code, "label": role.label} if role else None,
             "isAdmin": user.is_app_admin,
             "isPlatformAdmin": user.is_platform_admin,
+            "isSupport": user.is_platform_support,
+            "maintenanceEnabled": maintenance,
+            "clientSpaceEnabled": _client_space(user),
             "tenant": {"slug": user.tenant.slug, "name": user.tenant.name, "status": user.tenant.status} if user.tenant_id else None,
             "mustChangePassword": user.must_change_password,
             "permissions": permissions_of(user.role_id, user.tenant) if role else {},
             "capabilities": capabilities_of(user) if user.tenant_id else [],
+            "tenants": _tenants(user),
         }
 
 
@@ -57,3 +74,11 @@ def validate_new_password(password, user=None, field="new_password"):
         password_validation.validate_password(password, user)
     except DjangoValidationError as exc:
         raise serializers.ValidationError({field: exc.messages}) from exc
+
+
+def _client_space(user):
+    try:
+        from clientspace.views import has_module
+        return bool(user.tenant_id and has_module(user))
+    except Exception:
+        return False

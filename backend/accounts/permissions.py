@@ -2,6 +2,7 @@ from rest_framework.permissions import BasePermission
 
 from config.errors import ApiError, PasswordChangeRequired, TenantInactive
 
+from .capabilities import pilot_access_policy
 from .models import VERBS, RolePermission
 
 VERB_FIELDS = {verb: f"can_{verb}" for verb, _ in VERBS}
@@ -20,7 +21,13 @@ def has_perm(user, module, verb):
         cache = {m: p for m, p in cache.items() if module_enabled(user.tenant, m)}
         user._perm_cache = cache
     row = cache.get(module)
-    return bool(row and getattr(row, VERB_FIELDS[verb]))
+    allowed = bool(row and getattr(row, VERB_FIELDS[verb]))
+    if allowed and module == "project" and verb == "create":
+        policy = pilot_access_policy(user)
+        roles = policy.get("projectCreateRoles") if isinstance(policy, dict) else None
+        if isinstance(roles, list) and user.role_id not in roles:
+            return False
+    return allowed
 
 
 class PasswordChangeNotRequired(BasePermission):
@@ -50,6 +57,15 @@ class IsPlatformAdmin(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         return bool(user and user.is_authenticated and user.is_platform_admin and request.auth is None)
+
+
+class IsPlatformSupport(BasePermission):
+    message = "Réservé au support Control Tower et au Pilote."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and (user.is_platform_admin or user.is_platform_support)
+                    and request.auth is None)
 
 
 class TenantIsActive(BasePermission):

@@ -6,6 +6,7 @@ urlpatterns = [
     path("discussions", v.DiscussionListView.as_view()),
     path("discussions/<int:pk>", v.DiscussionDetailView.as_view()),
     path("discussions/<int:pk>/messages", v.MessageListView.as_view()),
+    path("discussions/<int:pk>/ai", v.DiscussionAiView.as_view()),
     path("discussions/<int:pk>/documents", v.DiscussionDocumentsView.as_view()),
     path("discussions/<int:pk>/synchronize", v.SynchronizeView.as_view()),
     path("messages/<int:pk>", v.MessageDetailView.as_view()),
@@ -20,5 +21,6 @@ urlpatterns = [
     path("teams/lifecycle", v.LifecycleView.as_view()),
     path("admin/teams", v.TeamsAdminView.as_view()),
     path("admin/teams/check", v.TeamsAdminCheckView.as_view()),
+    path("admin/connectors", v.TenantConnectorAssignmentsView.as_view()),
     path("me/notification-preferences", v.NotificationPreferencesView.as_view()),
 ]

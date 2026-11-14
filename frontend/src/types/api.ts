@@ -18,10 +18,14 @@ export interface Me {
   role: { code: string; label: string } | null;
   isAdmin: boolean;
   isPlatformAdmin: boolean;
+  isSupport: boolean;
+  maintenanceEnabled: boolean;
+  clientSpaceEnabled?: boolean;
   tenant: { slug: string; name: string; status: string } | null;
   mustChangePassword: boolean;
   permissions: Record<string, Flags>;
   capabilities: string[];
+  tenants?: { id: number; slug: string; name: string; current: boolean; role: string | null; active: boolean; reason?: string | null }[];
 }
 
 export interface AdminUser {
@@ -35,6 +39,7 @@ export interface AdminUser {
   team: string;
   client: string | null;
   isActive: boolean;
+  authMode: "standard" | "sso" | "both";
   mustChangePassword: boolean;
   lastLogin: string | null;
   projectCount: number;
@@ -74,7 +79,132 @@ export interface AdminProject {
   code: string;
   name: string;
   client: { code: string; name: string };
+  method?: string;
+  description?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  pm?: { id: number; name: string } | null;
+  tl?: { id: number; name: string } | null;
+  projectType?: string;
+  projectTypeLabel?: string;
+  baseProject?: string | null;
+  baseVersion?: string;
   actions: { id: string; title: string; status: string }[];
+}
+
+export interface ProjectClientChoice { code: string; name: string }
+export interface PlatformTenantRights {
+  catalog: { code: string; domain: string; action: string; delegable: boolean }[];
+  roles: { code: string; label: string; locked: boolean; projectCreate: boolean; capabilities: string[] }[];
+}
+export interface SaaSReport {
+  tenant?: string;
+  database?: { connected: boolean; serverVersion?: string; latencyMs?: number; migrations?: { applied: number; pending: string[] }; error?: string };
+  tenants?: { total: number; active: number; suspended: number };
+  api24h: { requests: number; serverErrors: number; clientErrors: number; avgMs: number };
+  deployment?: string;
+  restartAvailable: boolean;
+  restartMessage: string;
+}
+
+export interface SSOSettings {
+  enabled: boolean;
+  issuer: string;
+  clientId: string;
+  defaultRole: string;
+  secretSet: boolean;
+  secretHint: string;
+  domains: string[];
+  roles: { code: string; label: string }[];
+}
+
+export interface SSOAccessRequestRow {
+  id: number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  status: "pending" | "approved" | "rejected";
+  client?: string | null;
+  clientName?: string | null;
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+}
+
+export interface SSOAccessQueue {
+  requests: SSOAccessRequestRow[];
+  roles: { code: string; label: string; external?: boolean }[];
+}
+
+export interface AccessChangeQueue {
+  requests: { id: number; user: number; username: string; email: string; requestedBy: string; requestedRole: string;
+    reason: string; status: string; requestedAt: string; reviewedBy: string | null }[];
+  roles: { code: string; label: string }[];
+  users: { id: number; username: string; email: string }[];
+}
+
+export interface TimeEntryRow {
+  id: number; project: string; projectName: string; action: string | null; actionName: string;
+  user: number; userName: string; workDate: string; amount: string; unit: "hour" | "day";
+  status: "draft" | "pending" | "client" | "approved" | "rejected"; approvedBy: string | null; approvedAt: string | null; line?: string;
+  canDecide?: boolean;
+}
+
+export interface TimeEntries {
+  unit: "hour" | "day";
+  approval?: string;
+  rows: TimeEntryRow[];
+}
+
+export interface ApprovalMode {
+  code: string;
+  label: string;
+}
+
+export interface TimeSettings {
+  unit: "hour" | "day";
+  hoursPerDay: number;
+  clientVisible: boolean;
+  approval: string;
+  approvalModes: ApprovalMode[];
+}
+
+export interface TimeDelegationRow {
+  id: number;
+  delegator: number;
+  delegatorName: string;
+  delegate: number;
+  delegateName: string;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  state: "active" | "future" | "past";
+}
+
+export interface TimeDelegations {
+  mode: string;
+  modes: ApprovalMode[];
+  canManageAll: boolean;
+  people: { id: number; name: string }[];
+  rows: TimeDelegationRow[];
+}
+
+export interface TenantDomainRow {
+  id: number;
+  domain: string;
+  tenant: number;
+  tenantName: string;
+  client?: string | null;
+  clientName?: string | null;
+  enabled: boolean;
+  createdAt: string;
+  createdBy: string | null;
+}
+
+export interface ConnectorCatalogView {
+  connectors: { code: string; label: string }[];
+  projects: { id: string; name: string; client: string; clientCode?: string; tenant: number; tenantName: string; connectors: Record<string, boolean>; viaClient?: Record<string, boolean> }[];
+  clients?: { code: string; name: string; tenant: number; tenantName: string; projectCount: number; connectors: Record<string, boolean> }[];
 }
 
 export interface DatabaseStatus {
@@ -167,6 +297,16 @@ export interface TenantRow {
   id: number;
   slug: string;
   name: string;
+  industry: string;
+  website: string;
+  phone: string;
+  address: string;
+  city: string;
+  country: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  description: string;
   status: "active" | "suspended" | "disabled" | "archived";
   statusLabel: string;
   statusReason: string;
@@ -223,6 +363,39 @@ export interface Offer {
   position: number;
   currentVersion: OfferVersion | null;
   versions: OfferVersion[];
+}
+
+export interface OfferChoice {
+  id: number;
+  code: string;
+  name: string;
+  description: string;
+  version: Pick<OfferVersion, "id" | "number" | "price" | "currency" | "billingPeriod" | "licenseModel" | "namedLicenses" | "concurrentLicenses" | "maxUsers">;
+}
+
+export interface VoucherBatch {
+  batchId: string;
+  offer: string;
+  version: number;
+  tenant: string;
+  total: number;
+  redeemed: number;
+  installed: number;
+  revoked: number;
+  expiresAt: string | null;
+  createdAt: string;
+  createdBy: string | null;
+}
+
+export interface VoucherIssueResult {
+  batchId: string;
+  offer: string;
+  version: number;
+  tenant: string;
+  codes: string[];
+  expiresAt: string | null;
+  features: string[];
+  email: { sent: boolean; recipients: string[]; message: string };
 }
 
 export interface Subscription {
@@ -291,7 +464,8 @@ export type RequestStatus =
   | "PARTIALLY_APPROVED"
   | "REJECTED"
   | "CANCELLED"
-  | "FULFILLED";
+  | "FULFILLED"
+  | "INSTALLED";
 
 export interface LicenseRequest {
   id: number;
@@ -301,6 +475,7 @@ export interface LicenseRequest {
   quantity: number | null;
   quantityGranted: number | null;
   targetOffer: { id: number; name: string } | null;
+  targetVersion: { id: number; number: number; offer: string; price: string | null; currency: string; billingPeriod: string; namedLicenses: number; concurrentLicenses: number } | null;
   justification: string;
   status: RequestStatus;
   createdAt: string;

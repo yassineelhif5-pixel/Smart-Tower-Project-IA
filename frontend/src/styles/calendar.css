@@ -1215,3 +1215,21 @@ button.attach {
 .cal-title.no-cap {
   text-transform: none;
 }
+
+/* Assistants IA dans les discussions */
+.disc-ai { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; position: relative; }
+.disc-ai-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: color-mix(in srgb, var(--mate) 14%, var(--surface)); border: 1px solid color-mix(in srgb, var(--mate) 45%, transparent); color: var(--ink); }
+.disc-ai-chip button { border: 0; background: transparent; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; }
+.disc-ai-add { position: relative; }
+.disc-ai-menu { position: absolute; left: 0; top: calc(100% + 6px); max-width: calc(100vw - 32px); z-index: 30; width: 340px; max-height: 380px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.disc-ai-menu button { display: flex; gap: 10px; align-items: flex-start; text-align: left; border: 0; background: transparent; padding: 8px; border-radius: 10px; cursor: pointer; color: var(--ink); }
+.disc-ai-menu button:hover { background: color-mix(in srgb, var(--mate) 10%, var(--surface)); }
+.disc-ai-menu button:first-child { border: 1px solid color-mix(in srgb, var(--mate) 40%, var(--line)); }
+.disc-ai-ico { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 16px;
+  background: radial-gradient(circle at 35% 30%, #fff8, var(--mate)); }
+.disc-ai-menu small { color: var(--muted); }
+.disc-ai-menu em { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.msg.msg-ai .av { background: color-mix(in srgb, var(--mate) 22%, var(--surface)); font-size: 15px; }
+.msg.msg-ai .msg-b { border-left: 3px solid var(--mate); padding-left: 8px; white-space: pre-wrap; }

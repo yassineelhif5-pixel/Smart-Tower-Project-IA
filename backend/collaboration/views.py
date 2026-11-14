@@ -9,17 +9,72 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import IsAppAdmin, has_perm
+from accounts.permissions import IsAppAdmin, IsPlatformAdmin, has_perm
 from config.errors import ApiError
 from configuration import audit
 from configuration.models import CHANNELS, EVENTS, NotificationRule, ServiceSecret, UserNotificationPreference
 from projects.access import in_active_tenant
 
 from . import graph
+from . import ai as AI
 from . import services as S
-from .models import DiscussionMessage, TeamsConnector
+from .models import CONNECTOR_CATALOG, DiscussionMessage, ProjectConnectorGrant, TeamsConnector
+from projects.models import Project
 
 User = get_user_model()
+
+
+class PlatformConnectorAssignmentsView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        from collections import Counter
+        from projects.models import Client
+        from .client_connectors import client_grants_all
+        grants = {(row.project_id, row.connector): row.enabled for row in ProjectConnectorGrant.objects.all()}
+        by_client = client_grants_all()  # {(tenant, client): set(codes)}
+        rows = Project.objects.select_related("tenant", "client").order_by("tenant__name", "name")
+        counts = Counter(rows.values_list("client_id", flat=True))
+        return Response({"connectors": [{"code": code, "label": label} for code, label in CONNECTOR_CATALOG],
+            "clients": [{"code": c.code, "name": c.name, "tenant": c.tenant_id, "tenantName": c.tenant.name, "projectCount": counts.get(c.code, 0),
+                "connectors": {code: code in by_client.get((c.tenant_id, c.code), set()) for code, _ in CONNECTOR_CATALOG}}
+                for c in Client.objects.select_related("tenant").order_by("tenant__name", "name")],
+            "projects": [{"id": p.pk, "name": p.name, "client": p.client.name, "clientCode": p.client_id, "tenant": p.tenant_id,
+                "tenantName": p.tenant.name, "connectors": {code: grants.get((p.pk, code), False) for code, _ in CONNECTOR_CATALOG},
+                "viaClient": {code: code in by_client.get((p.tenant_id, p.client_id), set()) for code, _ in CONNECTOR_CATALOG}}
+                for p in rows]})
+
+    def post(self, request):
+        if request.data.get("client"):
+            from .client_connectors import set_client_grant
+            code, enabled = request.data.get("connector"), request.data.get("enabled")
+            if code not in dict(CONNECTOR_CATALOG) or not isinstance(enabled, bool):
+                raise ApiError("VALIDATION_ERROR", "Connecteur ou état invalide.")
+            n = set_client_grant(request.user, request.data.get("tenant"), request.data["client"], code, enabled)
+            return Response({"client": request.data["client"], "connector": code, "enabled": enabled, "projects": n})
+        project = get_object_or_404(Project.objects.select_related("tenant"), pk=request.data.get("project"))
+        code, enabled = request.data.get("connector"), request.data.get("enabled")
+        if code not in dict(CONNECTOR_CATALOG) or not isinstance(enabled, bool):
+            raise ApiError("VALIDATION_ERROR", "Connecteur ou état invalide.")
+        row, created = ProjectConnectorGrant.objects.update_or_create(
+            project=project, connector=code,
+            defaults={"tenant": project.tenant, "enabled": enabled, "assigned_by": request.user},
+        )
+        audit.record(request.user, f"{dict(CONNECTOR_CATALOG)[code]} · {project.name}",
+            "Connecteur affecté au projet" if enabled else "Connecteur retiré du projet",
+            "non affecté" if created else ("activé" if not enabled else "désactivé"),
+            "activé" if enabled else "désactivé", tenant=project.tenant)
+        return Response({"project": project.pk, "connector": code, "enabled": row.enabled})
+
+
+class TenantConnectorAssignmentsView(APIView):
+    permission_classes = [permissions.IsAuthenticated, IsAppAdmin]
+
+    def get(self, request):
+        if not in_active_tenant(request.user):
+            raise ApiError("TENANT_INACTIVE", "Entreprise inactive.", status.HTTP_403_FORBIDDEN)
+        rows = ProjectConnectorGrant.objects.filter(tenant=request.user.tenant, enabled=True).values_list("connector", flat=True).distinct()
+        return Response([{"code": code, "label": dict(CONNECTOR_CATALOG)[code]} for code in rows])
 
 
 def fail(exc):
@@ -44,7 +99,7 @@ def message_row(m, user):
         "mentions": [person(u) for u in m.mentions.all()],
         "attachments": [{"id": d.pk, "name": d.name, "ext": d.ext} for d in m.attachments.all()],
         "createdAt": m.created_at, "editedAt": m.edited_at, "deletedAt": m.deleted_at,
-        "historyCount": len(m.history or []),
+        "historyCount": len(m.history or []), "ai": AI.mate(m.ai_author) if m.ai_author else None,
         "mine": m.author_id == user.pk,
         "canEdit": m.author_id == user.pk and m.origin == "pct" and m.kind == "message" and not deleted,
         "canRetry": m.author_id == user.pk and m.publication_status == "failed",
@@ -60,7 +115,7 @@ def discussion_row(d, user, with_counts=True):
         "status": d.status, "lastError": d.last_error, "createdBy": person(d.created_by), "createdAt": d.created_at,
         "lastMessageAt": d.last_message_at, "lastSyncedAt": d.last_synced_at, "private": d.is_private,
         "participants": [{**person(p.user), "role": p.role} for p in d.participants.select_related("user")],
-        "canPost": S.can_post(user, d),
+        "canPost": S.can_post(user, d), "ai": AI.info(d, user),
     }
     if with_counts:
         row["messageCount"] = d.messages.filter(deleted_at__isnull=True, kind="message").count()
@@ -114,6 +169,32 @@ class DiscussionDetailView(APIView):
             d.status = request.data["status"]
         d.save()
         audit.record(request.user, f"Projet {d.project.code}", "Discussion modifiée", "", f"{d.title} ({d.status})")
+        return Response(discussion_row(d, request.user))
+
+
+class DiscussionAiView(APIView):
+    """POST {code} : ajoute un assistant IA (Maestro analyse et affecte la tâche). DELETE ?code= : le retire."""
+
+    def _get(self, request, pk):
+        require(request.user)
+        return get_object_or_404(S.visible_discussions(request.user).select_related("project", "action", "action__owner", "created_by"), pk=pk)
+
+    def post(self, request, pk):
+        d = self._get(request, pk)
+        try:
+            with transaction.atomic():
+                AI.add(request.user, d, str(request.data.get("code") or ""))
+        except AI.AiError as exc:
+            raise ApiError(exc.code, exc.message, exc.http_status) from exc
+        d.refresh_from_db()
+        return Response(discussion_row(d, request.user))
+
+    def delete(self, request, pk):
+        d = self._get(request, pk)
+        try:
+            AI.remove(request.user, d, str(request.query_params.get("code") or ""))
+        except AI.AiError as exc:
+            raise ApiError(exc.code, exc.message, exc.http_status) from exc
         return Response(discussion_row(d, request.user))
 
 

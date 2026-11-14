@@ -171,25 +171,46 @@ export function TeamCapacityPage({ info }: PageProps) {
         </>
       )}
       <div className="grid g2">
-        <Allocations projectId={id} allocs={allocs} canEdit={info.can.capacity} onChange={c.reload} />
+        <Allocations projectId={id} allocs={allocs} canEdit={info.can.capacity} onChange={c.reload}
+          scrum={info.features.includes("scrum")} phases={info.features.includes("phases") || !info.features.includes("scrum")} />
         <Availabilities projectId={id} av={av} canEdit={info.can.capacity} onChange={() => (av.reload(), c.reload())} />
       </div>
     </div>
   );
 }
 
+/** Rôles proposés selon la méthodologie du projet : Scrum (PO, SM, Dev) ou Cycle en V / autres (rôles projet). */
+const PROJECT_ROLES = [
+  "Chef de projet",
+  "Directeur de projet",
+  "Tech Lead",
+  "Architecte",
+  "Business analyst / MOA",
+  "Consultant fonctionnel",
+  "Consultant technique",
+  "Développeur",
+  "Testeur / QA",
+  "Expert",
+];
+
 function Allocations({
   projectId,
   allocs,
   canEdit,
   onChange,
+  scrum,
+  phases,
 }: {
   projectId: string;
   allocs: Loadable<Allocation[]>;
   canEdit: boolean;
   onChange: () => void;
+  scrum: boolean;
+  phases: boolean;
 }) {
   const people = useApi(() => calendarApi.people(projectId), [projectId]);
+  // Tous les collaborateurs internes : ceux hors équipe sont ajoutés au projet en même temps que leur capacité.
+  const everyone = useApi(() => calendarApi.people(undefined, true), []);
   const { run, busy } = useAction();
   const save = (a: Allocation, patch: Partial<Allocation>) =>
     void run(() => methodologyApi.saveAllocation(a.id, patch), "Affectation enregistrée").then(
@@ -200,14 +221,15 @@ function Allocations({
   return (
     <Card
       title="Équipe et affectations"
-      sub="Taux d'affectation, heures par jour, jours travaillés, réunions récurrentes. Rôles Scrum indépendants des droits PCT."
+      sub={scrum && !phases ? "Taux d'affectation, heures par jour, jours travaillés, réunions. Rôles Scrum : Product Owner, Scrum Master, Développeur." : "Taux d'affectation, heures par jour, jours travaillés, réunions. Le rôle sur le projet dépend de la méthodologie (indépendant des droits PCT)."}
     >
       <div className="tbl-wrap">
         <table className="tbl tight">
           <thead>
             <tr>
               <th>Collaborateur</th>
-              <th>Rôle Scrum</th>
+              {phases && <th>Rôle sur le projet</th>}
+              {scrum && <th>Rôle Scrum</th>}
               <th className="r">%</th>
               <th className="r">h/j</th>
               <th className="r">j/sem</th>
@@ -219,24 +241,41 @@ function Allocations({
               .filter((a) => a.active)
               .map((a) => (
                 <tr key={a.id}>
-                  <td>
-                    {a.user.name}
-                    <div className="muted">{a.projectRole}</div>
-                  </td>
-                  <td>
-                    <select
-                      className="inp"
-                      aria-label={`Rôle Scrum de ${a.user.name}`}
-                      disabled={!canEdit}
-                      value={a.scrumRole}
-                      onChange={(e) => save(a, { scrumRole: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      <option value="po">Product Owner</option>
-                      <option value="sm">Scrum Master</option>
-                      <option value="dev">Developer</option>
-                    </select>
-                  </td>
+                  <td>{a.user.name}</td>
+                  {phases && (
+                    <td>
+                      <select
+                        className="inp"
+                        aria-label={`Rôle sur le projet de ${a.user.name}`}
+                        disabled={!canEdit}
+                        value={a.projectRole}
+                        onChange={(e) => save(a, { projectRole: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {[...PROJECT_ROLES, ...(a.projectRole && !PROJECT_ROLES.includes(a.projectRole) ? [a.projectRole] : [])].map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+                  {scrum && (
+                    <td>
+                      <select
+                        className="inp"
+                        aria-label={`Rôle Scrum de ${a.user.name}`}
+                        disabled={!canEdit}
+                        value={a.scrumRole}
+                        onChange={(e) => save(a, { scrumRole: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        <option value="po">Product Owner</option>
+                        <option value="sm">Scrum Master</option>
+                        <option value="dev">Développeur</option>
+                      </select>
+                    </td>
+                  )}
                   {(["allocationPct", "hoursPerDay", "daysPerWeek", "meetingHoursPerWeek"] as const).map((k) => (
                     <td key={k} className="r">
                       <input
@@ -266,19 +305,41 @@ function Allocations({
               () => methodologyApi.addAllocation(projectId, { user: Number(e.target.value), allocationPct: 100 }),
               "Collaborateur ajouté",
             ).then(
-              () => (allocs.reload(), onChange()),
+              () => (allocs.reload(), people.reload(), onChange()),
               () => undefined,
             )
           }
         >
-          <option value="">+ Ajouter un collaborateur…</option>
-          {(people.data ?? [])
-            .filter((p) => !(allocs.data ?? []).some((a) => a.user.id === p.id && a.active))
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+          <option value="">+ Ajouter un collaborateur (consultant, développeur…)</option>
+          {(() => {
+            const allocated = (id: number) => (allocs.data ?? []).some((a) => a.user.id === id && a.active);
+            const members = (people.data ?? []).filter((p) => !allocated(p.id));
+            const memberIds = new Set((people.data ?? []).map((p) => p.id));
+            const others = (everyone.data ?? []).filter((p) => !memberIds.has(p.id) && !allocated(p.id));
+            const label = (p: { name: string; role?: string }) => (p.role ? `${p.name} · ${p.role}` : p.name);
+            return (
+              <>
+                {members.length > 0 && (
+                  <optgroup label="Équipe du projet">
+                    {members.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {label(p)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {others.length > 0 && (
+                  <optgroup label="Autres collaborateurs (ajoutés à l’équipe du projet)">
+                    {others.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {label(p)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </>
+            );
+          })()}
         </select>
       )}
     </Card>

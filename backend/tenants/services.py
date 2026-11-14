@@ -1,6 +1,7 @@
 """Opérations du Pilote sur les tenants : création contrôlée et changement de statut, toujours audités."""
 import secrets
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -28,7 +29,10 @@ def provision(tenant):
     for row in RoleCapability.objects.filter(tenant__isnull=True):
         RoleCapability.objects.get_or_create(tenant=tenant, role_id=row.role_id, code=row.code)
     for kind, _ in CHANNELS:
-        NotificationChannel.objects.get_or_create(tenant=tenant, kind=kind, defaults={"enabled": kind == "inapp"})
+        defaults = {"enabled": kind == "inapp"}
+        if kind == "email":
+            defaults["settings"] = dict(settings.DEFAULT_SMTP_SETTINGS)
+        NotificationChannel.objects.get_or_create(tenant=tenant, kind=kind, defaults=defaults)
         for event, _ in EVENTS:
             NotificationRule.objects.get_or_create(tenant=tenant, event=event, channel=kind,
                                                    defaults={"enabled": kind == "inapp"})
@@ -36,7 +40,7 @@ def provision(tenant):
 
 @transaction.atomic
 def create_tenant(*, by, name, slug=None, admin_username, admin_email="", admin_first_name="", admin_last_name="",
-                  version=None, contract_reference="", end_date=None):
+                  version=None, custom_offer=None, contract_reference="", end_date=None):
     """Crée une entreprise cliente et son premier administrateur (mot de passe provisoire, à changer).
 
     Avec une version d'offre : l'abonnement et son stock initial sont créés, et le premier administrateur
@@ -59,6 +63,41 @@ def create_tenant(*, by, name, slug=None, admin_username, admin_email="", admin_
     admin.save()
     audit.record(by, f"Entreprise {tenant.name}", "Entreprise créée", "", f"identifiant {slug}", tenant=None)
     audit.record(by, f"Utilisateur {admin.username}", "Premier administrateur créé", "", "", tenant=tenant)
+    if custom_offer is not None:
+        from licensing.models import Offer, OfferVersion
+        base_code = f"custom-{slug}"[:30].rstrip("-") or "custom-offer"
+        code = base_code
+        suffix = 2
+        while Offer.objects.filter(code=code).exists():
+            tail = f"-{suffix}"
+            code = f"{base_code[:30-len(tail)]}{tail}"
+            suffix += 1
+        offer_name = custom_offer["name"].strip()
+        offer = Offer.objects.create(
+            code=code,
+            name=offer_name,
+            description=f"Offre personnalisée pour {tenant.name}.",
+            position=999,
+        )
+        version = OfferVersion.objects.create(
+            offer=offer,
+            number=1,
+            is_published=True,
+            price=custom_offer.get("price"),
+            currency=custom_offer.get("currency", "EUR"),
+            billing_period=custom_offer.get("billingPeriod", "month"),
+            duration_days=custom_offer.get("durationDays"),
+            trial_days=custom_offer.get("trialDays", 0),
+            license_model=custom_offer["licenseModel"],
+            max_users=custom_offer.get("maxUsers"),
+            named_licenses=custom_offer.get("namedLicenses", 0),
+            concurrent_licenses=custom_offer.get("concurrentLicenses", 0),
+            max_sessions_per_user=custom_offer.get("maxSessionsPerUser"),
+            features=custom_offer.get("features", []),
+            conditions=custom_offer.get("conditions", ""),
+            created_by=by,
+        )
+        audit.record(by, f"Offre {offer.name}", "Offre personnalisée créée pour un client", "", f"v{version.number} publiée", tenant=None)
     if version is not None:
         from licensing import models as L
         from licensing import services as licensing

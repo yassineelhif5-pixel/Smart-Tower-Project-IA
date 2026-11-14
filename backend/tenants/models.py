@@ -28,6 +28,16 @@ TRANSITIONS = {
 class Tenant(models.Model):
     slug = models.SlugField(max_length=50, unique=True, help_text="Identifiant court, ex. « demo-esn »")
     name = models.CharField(max_length=120)
+    industry = models.CharField(max_length=120, blank=True)
+    website = models.URLField(max_length=255, blank=True)
+    phone = models.CharField(max_length=40, blank=True)
+    address = models.CharField(max_length=200, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    country = models.CharField(max_length=80, blank=True)
+    contact_name = models.CharField(max_length=150, blank=True)
+    contact_email = models.EmailField(max_length=254, blank=True)
+    contact_phone = models.CharField(max_length=40, blank=True)
+    description = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUSES, default=ACTIVE)
     status_reason = models.CharField(max_length=300, blank=True)
     status_changed_at = models.DateTimeField(null=True, blank=True)
@@ -45,6 +55,22 @@ class Tenant(models.Model):
     @property
     def is_active(self):
         return self.status == ACTIVE
+
+
+class TenantDomain(models.Model):
+    """Domaine e-mail attribué par le Pilote à une entreprise pour l'accès SSO."""
+
+    domain = models.CharField(max_length=253, unique=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="sso_domains")
+    # Domaine propre à un client de l'entreprise : les comptes de ce domaine sont rattachés à ce client.
+    client = models.ForeignKey("projects.Client", on_delete=models.SET_NULL, null=True, blank=True, related_name="domains")
+    enabled = models.BooleanField(default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["domain"]
 
 
 class TenantOwned(models.Model):

@@ -1,6 +1,7 @@
 import secrets
 
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from rest_framework import serializers
 
 from accounts.models import ADMIN_ROLE, PLATFORM_ROLE, Role
@@ -26,8 +27,10 @@ class AdminUserSerializer(serializers.ModelSerializer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
-        tenant = getattr(getattr(request, "user", None), "tenant", None)
+        tenant = self.context.get("tenant") or getattr(getattr(request, "user", None), "tenant", None)
         self.fields["client"].queryset = Client.objects.filter(tenant=tenant) if tenant else Client.objects.none()
+        self.fields["role"].queryset = (Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=tenant))
+                                        .exclude(code=PLATFORM_ROLE) if tenant else Role.objects.none())
     password = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=False, max_length=128)
     projectCount = serializers.SerializerMethodField()
     mustChangePassword = serializers.BooleanField(source="must_change_password", read_only=True)
@@ -35,11 +38,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
     firstName = serializers.CharField(source="first_name", required=False, allow_blank=True, max_length=150)
     lastName = serializers.CharField(source="last_name", required=False, allow_blank=True, max_length=150)
     isActive = serializers.BooleanField(source="is_active", required=False)
+    authMode = serializers.ChoiceField(source="auth_mode", choices=["standard", "sso", "both"], required=False)
 
     class Meta:
         model = User
         fields = ["id", "username", "firstName", "lastName", "email", "role", "title", "team", "client",
-                  "isActive", "mustChangePassword", "lastLogin", "projectCount", "password"]
+                  "isActive", "mustChangePassword", "authMode", "lastLogin", "projectCount", "password"]
 
     def get_projectCount(self, user):
         return user.project_accesses.count()
@@ -50,6 +54,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
         client = data.get("client", instance.client if instance else None)
         if role is None:
             raise serializers.ValidationError({"role": "Le rôle est obligatoire."})
+        if not role.internal and client is None:
+            from .client_domains import client_for_email
+            tenant = self.context.get("tenant") or getattr(self.context["request"].user, "tenant", None)
+            client = client_for_email(tenant, data.get("email") or (instance.email if instance else ""))
+            if client is not None:
+                data["client"] = client
         if not role.internal and client is None:
             raise serializers.ValidationError({"client": "Un compte du portail client doit être rattaché à un client."})
         if role.internal:
@@ -69,6 +79,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
     def create(self, data):
         password = data.pop("password", "") or temporary_password()
+        # L'espace client vient toujours de la session de l'administrateur, jamais du formulaire.
+        # Ainsi un compte créé ne peut pas être rattaché à un autre tenant ni rester sans entité.
+        tenant = self.context.get("tenant") or self.context["request"].user.tenant
+        if tenant is None:
+            raise serializers.ValidationError({"tenant": "Aucune entreprise n'est associée à cet administrateur."})
+        data["tenant"] = tenant
         user = User(**data, must_change_password=True)
         user.set_password(password)
         user.save()
@@ -81,6 +97,22 @@ class AdminUserSerializer(serializers.ModelSerializer):
             setattr(user, field, value)
         user.save()
         return user
+
+
+class RoleCreateSerializer(serializers.Serializer):
+    label = serializers.CharField(max_length=60, trim_whitespace=True)
+    question = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    internal = serializers.BooleanField(required=False, default=True)
+    money = serializers.BooleanField(required=False, default=False)
+    margin = serializers.BooleanField(required=False, default=False)
+
+
+class SSOConnectorSerializer(serializers.Serializer):
+    issuer = serializers.CharField(max_length=500, trim_whitespace=True)
+    clientId = serializers.CharField(max_length=255, trim_whitespace=True)
+    clientSecret = serializers.CharField(max_length=4096, required=False, allow_blank=True, trim_whitespace=False, write_only=True)
+    defaultRole = serializers.CharField(max_length=20)
+    enabled = serializers.BooleanField(required=False, default=False)
 
 
 class AccessSerializer(serializers.Serializer):

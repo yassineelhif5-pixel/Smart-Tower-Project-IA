@@ -1,0 +1,23 @@
+# Secrets et environnements locaux
+.env
+**/.env
+.venv*/
+**/.venv*/
+node_modules/
+**/node_modules/
+dist/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+# Journaux et fichiers de recette locaux
+*.log
+*_log.txt
+backend/qa_accounts.txt
+backend/*_err.txt
+backend/*_out.txt
+backend/err.txt
+backend/out.txt
+backend/stdout.txt
+backend/stderr.txt
+backend/diagnostic.txt
+_to_delete/

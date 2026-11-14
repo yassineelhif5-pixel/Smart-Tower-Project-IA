@@ -20,6 +20,7 @@ export function ChangePasswordPage({
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<Me | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -30,7 +31,7 @@ export function ChangePasswordPage({
     setBusy(true);
     setErrors({});
     try {
-      onDone(await authApi.changePassword(current, next));
+      setDone(await authApi.changePassword(current, next));
     } catch (err) {
       if (err instanceof ApiError)
         setErrors({
@@ -40,6 +41,20 @@ export function ChangePasswordPage({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (done) {
+    return (
+      <AuthLayout title="Mot de passe validé" sub="Votre nouveau mot de passe est enregistré.">
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="callout ok" role="status">
+            <b>✓ Mot de passe validé</b>
+            <div>Utilisez désormais ce mot de passe avec votre identifiant de connexion : <b className="mono">{done.username ?? me.username}</b></div>
+          </div>
+          <button className="btn primary" type="button" style={{ justifyContent: "center" }} autoFocus onClick={() => onDone(done)}>Accéder à l’application</button>
+        </div>
+      </AuthLayout>
+    );
   }
 
   return (

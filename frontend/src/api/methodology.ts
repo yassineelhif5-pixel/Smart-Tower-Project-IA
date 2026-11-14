@@ -63,6 +63,7 @@ export const methodologyApi = {
     }>(`${P(id)}/phases`),
   addPhase: (id: string, body: Body) => api.post<Phase>(`${P(id)}/phases`, body),
   savePhase: (pid: number, body: Body) => api.patch<Phase>(`/methodology/phases/${pid}`, body),
+  deletePhase: (pid: number) => api.delete<void>(`/methodology/phases/${pid}`),
 
   week: (id: string, week: string) => api.get<WeekData>(`${P(id)}/weeks/${week}`),
   weekAction: (id: string, week: string, action: string, body: Body = {}) =>

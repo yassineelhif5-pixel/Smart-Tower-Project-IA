@@ -15,6 +15,7 @@ SECRET_CATALOG = {
     "teams_webhook_url": {"label": "URL du webhook Teams", "used_by": "Notifications · Teams"},
     "slack_webhook_url": {"label": "URL du webhook Slack", "used_by": "Notifications · Slack"},
     "teams_client_secret": {"label": "Secret client de l'application Microsoft", "used_by": "Connecteur Microsoft Teams"},
+    "sso_client_secret": {"label": "Secret du connecteur SSO", "used_by": "Connexion SSO OpenID Connect"},
 }
 
 CHANNELS = [("inapp", "Dans l'application"), ("email", "E-mail (SMTP)"), ("teams", "Microsoft Teams"), ("slack", "Slack")]

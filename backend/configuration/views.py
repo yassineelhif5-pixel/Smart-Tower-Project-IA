@@ -1,4 +1,5 @@
 """API du module Configuration (réservée aux administrateurs) et notifications de l'utilisateur."""
+import secrets
 import time
 from datetime import timedelta
 
@@ -9,22 +10,26 @@ from django.db.models import Avg, Count, Q
 from django.shortcuts import get_object_or_404
 from django.urls import URLPattern, URLResolver, get_resolver
 from django.utils import timezone
-from rest_framework import permissions, status
+from django.utils.text import slugify
+from rest_framework import permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import MODULES, VERBS, Role, RolePermission
+from accounts.models import MODULES, VERBS, Role, RolePermission, SSOAccessRequest, SSOConnector, SSOIdentity, UserAccessChangeRequest
+from accounts.capabilities import has_capability
 from accounts.models import PLATFORM_ROLE
-from accounts.permissions import IsAppAdmin, IsPlatformAdmin, LicenseIsValid, PasswordChangeNotRequired, TenantIsActive
+from accounts.permissions import IsAppAdmin, IsPlatformAdmin, IsPlatformSupport, LicenseIsValid, PasswordChangeNotRequired, TenantIsActive, has_perm
 from accounts.serializers import permissions_of
 from config.errors import ApiError
-from projects.models import Action, ActionAccess, Project, ProjectAccess
+from projects.access import in_active_tenant
+from projects.models import Action, ActionAccess, Client, Project, ProjectAccess
+from tenants.models import TenantDomain
 
 from . import audit, notify
-from .models import (CHANNEL_SECRET, CHANNELS, EVENTS, SECRET_CATALOG, ApiRequestLog, ApiToken, AuditEvent,
+from .models import (CHANNEL_SECRET, CHANNELS, EVENTS, SECRET_CATALOG, ApiRequestLog, ApiToken, AppSetting, AuditEvent,
                      Notification, NotificationChannel, NotificationRule, ServiceSecret)
 from .serializers import (AccessSerializer, AdminUserSerializer, ChannelSerializer, ChannelTestSerializer,
-                          PermissionsSerializer, RulesSerializer, SecretSerializer, TokenCreateSerializer,
+                          PermissionsSerializer, RoleCreateSerializer, RulesSerializer, SSOConnectorSerializer, SecretSerializer, TokenCreateSerializer,
                           temporary_password)
 
 User = get_user_model()
@@ -53,6 +58,77 @@ class PlatformView(APIView):
     """Administration de la plateforme : Pilote uniquement."""
 
     permission_classes = PLATFORM
+
+
+class PlatformTenantRightsView(PlatformView):
+    """Pilotage des permissions de création projet et d'administration par profil d'un tenant."""
+    permission_classes = [permissions.IsAuthenticated, PasswordChangeNotRequired, IsPlatformSupport]
+
+    def get(self, request, pk):
+        from accounts.capabilities import CATALOG, RoleCapability
+        from tenants.models import Tenant
+        tenant = get_object_or_404(Tenant, pk=pk)
+        roles = Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=tenant)).exclude(code__in=[PLATFORM_ROLE, "support"]).order_by("position", "label")
+        policy_row = AppSetting.objects.filter(tenant=tenant, key="pilot_access_policy").first()
+        policy = policy_row.value if policy_row and isinstance(policy_row.value, dict) else {}
+        result = []
+        for role in roles:
+            row = RolePermission.objects.filter(tenant=tenant, role=role, module="project").first()
+            caps = set(RoleCapability.objects.filter(tenant=tenant, role=role).values_list("code", flat=True))
+            project_roles = policy.get("projectCreateRoles")
+            cap_roles = policy.get("capabilityRoles", {})
+            if role.code != "admin" and isinstance(project_roles, list):
+                project_create = role.code in project_roles
+            else:
+                project_create = True if role.code == "admin" else bool(row and row.can_create)
+            if role.code != "admin":
+                caps = {code for code, allowed in cap_roles.items() if isinstance(allowed, list) and role.code in allowed} if cap_roles else caps
+            result.append({"code": role.code, "label": role.label, "locked": role.code == "admin",
+                           "projectCreate": project_create,
+                           "capabilities": sorted({c for c, _, _ in CATALOG} if role.code == "admin" else caps)})
+        return Response({"catalog": [{"code": c, "domain": d, "action": a, "delegable": c not in {"roles.administer"}} for c, d, a in CATALOG],
+                         "roles": result})
+
+    def put(self, request, pk):
+        from accounts.capabilities import CATALOG, CODES, NOT_DELEGABLE, RoleCapability
+        from tenants.models import Tenant
+        tenant = get_object_or_404(Tenant, pk=pk)
+        wanted = request.data.get("roles")
+        if not isinstance(wanted, dict) or "admin" in wanted or PLATFORM_ROLE in wanted:
+            raise ApiError("VALIDATION_ERROR", "Fournissez les droits modifiables par profil ; le profil Administrateur reste verrouillé.")
+        roles = {r.code: r for r in Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=tenant)).exclude(code__in=[PLATFORM_ROLE, "support"])}
+        for code, values in wanted.items():
+            if code not in roles or not isinstance(values, dict) or not isinstance(values.get("projectCreate"), bool):
+                raise ApiError("VALIDATION_ERROR", "Profil ou règle de création projet invalide.", details=[code])
+            caps = values.get("capabilities", [])
+            if not isinstance(caps, list) or set(caps) - CODES or set(caps) & NOT_DELEGABLE:
+                raise ApiError("VALIDATION_ERROR", "Une permission d'administration est inconnue ou réservée.", details=[code])
+        with transaction.atomic():
+            project_roles = ["admin"] + [code for code, values in wanted.items() if values["projectCreate"]]
+            capability_roles = {cap: ["admin"] + [code for code, values in wanted.items() if cap in values.get("capabilities", [])]
+                                for cap, _, _ in CATALOG}
+            for code, values in wanted.items():
+                role = roles[code]
+                row, _ = RolePermission.objects.get_or_create(tenant=tenant, role=role, module="project", defaults={
+                    "can_read": False, "can_create": False, "can_update": False, "can_delete": False, "can_approve": False})
+                if row.can_create != values["projectCreate"]:
+                    before = row.can_create
+                    row.can_create = values["projectCreate"]
+                    row.save(update_fields=["can_create"])
+                    audit.record(request.user, f"Entreprise {tenant.name} · {role.label}", "Droit de création projet modifié",
+                                 "accordé" if before else "refusé", "accordé" if row.can_create else "refusé", tenant=None)
+                caps = set(values.get("capabilities", []))
+                before = set(RoleCapability.objects.filter(tenant=tenant, role=role).values_list("code", flat=True))
+                RoleCapability.objects.filter(tenant=tenant, role=role).exclude(code__in=caps).delete()
+                for cap in caps - before:
+                    RoleCapability.objects.create(tenant=tenant, role=role, code=cap)
+                if before != caps:
+                    audit.record(request.user, f"Entreprise {tenant.name} · {role.label}", "Droits d'administration modifiés",
+                                 ", ".join(sorted(before)) or "aucun", ", ".join(sorted(caps)) or "aucun", tenant=None)
+            AppSetting.objects.update_or_create(tenant=tenant, key="pilot_access_policy", defaults={
+                "value": {"projectCreateRoles": project_roles, "capabilityRoles": capability_roles}})
+            audit.record(request.user, f"Entreprise {tenant.name}", "Politique d'accès Pilotée modifiée", "", "Droits d'accès définis par profil", tenant=None)
+        return self.get(request, pk)
 
 
 def int_param(request, name, default, low, high):
@@ -177,21 +253,223 @@ class UserAccessView(AdminView):
         return self.get(request, pk)
 
 
+class TenantCompanyProfileView(AdminView):
+    """Fiche de l'entreprise visible et modifiable par son propre administrateur."""
+    FIELDS = {"industry": "industry", "website": "website", "phone": "phone", "address": "address",
+              "city": "city", "country": "country", "contactName": "contact_name", "contactEmail": "contact_email",
+              "contactPhone": "contact_phone", "description": "description"}
+
+    def get(self, request):
+        from tenants.views import tenant_row
+        return Response(tenant_row(self.tenant))
+
+    def patch(self, request):
+        from tenants.views import TenantUpdateSerializer, tenant_row
+        serializer = TenantUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if set(values) - set(self.FIELDS):
+            raise ApiError("VALIDATION_ERROR", "Cette fiche accepte uniquement les coordonnées de l'entreprise.")
+        changed = []
+        for external, field in self.FIELDS.items():
+            if external in values and getattr(self.tenant, field) != values[external]:
+                setattr(self.tenant, field, values[external])
+                changed.append(field)
+        if changed:
+            self.tenant.save(update_fields=changed)
+            audit.record(request.user, f"Entreprise {self.tenant.name}", "Fiche entreprise modifiée", "", ", ".join(changed))
+        return Response(tenant_row(self.tenant))
+
+
+PROJECT_ROLES = {"pm": ({"cdp"}, ("chef de projet",)), "tl": ({"techlead"}, ("tech lead", "techlead"))}
+
+
+def has_project_role(user, key):
+    """Le chef de projet / Tech Lead d'un projet doit avoir le profil correspondant (code ou libellé)."""
+    codes, labels = PROJECT_ROLES[key]
+    role = user.role
+    return bool(role) and (role.code in codes or any(l in role.label.lower() for l in labels))
+
+
+def new_client_code(name):
+    """La clé d'un client est unique sur toute la plateforme : code lisible + suffixe aléatoire."""
+    stem = (slugify(name).replace("-", "").upper() or "CLIENT")[:13]
+    code = f"{stem}-{secrets.token_hex(3).upper()}"
+    while Client.objects.filter(pk=code).exists():
+        code = f"{stem}-{secrets.token_hex(3).upper()}"
+    return code
+
+
+def own_company_client(tenant, user):
+    """Client qui représente l'entreprise connectée elle-même (projets internes)."""
+    client = Client.objects.filter(tenant=tenant, name__iexact=tenant.name).first()
+    if client is None:
+        client = Client.objects.create(tenant=tenant, code=new_client_code(tenant.name), name=tenant.name, label="Interne")
+        audit.record(user, f"Client {client.name}", "Client créé (entreprise connectée)")
+    return client
+
+
 class AdminProjectsView(AdminView):
     """Tous les projets et leurs tâches, pour choisir les accès à affecter."""
 
     def get(self, request):
-        projects = Project.objects.filter(tenant=self.tenant).select_related("client").prefetch_related("actions")
-        return Response([{
-            "id": p.id, "code": p.code, "name": p.name, "client": {"code": p.client_id, "name": p.client.name},
-            "actions": [{"id": a.id, "title": a.title, "status": a.status} for a in p.actions.all()],
-        } for p in projects])
+        projects = Project.objects.filter(tenant=self.tenant).select_related("client", "pm", "tl").prefetch_related("actions")
+        return Response([admin_project_row(p) for p in projects])
+
+    def post(self, request):
+        from django.utils.text import slugify
+
+        if not in_active_tenant(request.user) or not has_perm(request.user, "project", "create"):
+            raise ApiError("FORBIDDEN_PERMISSION", "Vous n'avez pas le droit de créer un projet.", status.HTTP_403_FORBIDDEN)
+        code = str(request.data.get("code", "")).strip().upper()
+        name = str(request.data.get("name", "")).strip()
+        client_code = str(request.data.get("client", "")).strip()
+        if not code or len(code) > 20 or not name or len(name) > 200:
+            raise ApiError("VALIDATION_ERROR", "Indiquez un code (20 caractères maximum) et un nom.")
+        if Project.objects.filter(tenant=self.tenant, code__iexact=code).exists():
+            raise ApiError("VALIDATION_ERROR", "Ce code projet existe déjà dans votre entreprise.")
+        # Sans client choisi, le projet est rattaché à l'entreprise connectée (client créé au premier usage).
+        client = (get_object_or_404(Client, tenant=self.tenant, code=client_code) if client_code
+                  else own_company_client(self.tenant, request.user))
+        project_id = slugify(code).replace("-", "")[:20].upper()
+        if not project_id or Project.objects.filter(pk=project_id).exists():
+            raise ApiError("VALIDATION_ERROR", "Le code ne permet pas de créer un identifiant projet unique.")
+        from django.utils.dateparse import parse_date
+        dates = {}
+        for key, field in (("startDate", "start_date"), ("endDate", "end_date")):
+            raw = request.data.get(key) or ""
+            parsed = parse_date(str(raw)) if raw else None
+            if raw and parsed is None:
+                raise ApiError("VALIDATION_ERROR", f"La date {key} est invalide.")
+            dates[field] = parsed
+        if dates["start_date"] and dates["end_date"] and dates["end_date"] < dates["start_date"]:
+            raise ApiError("VALIDATION_ERROR", "La date de fin doit être postérieure à la date de début.")
+        members = []
+        for key, field in (("pm", "pm"), ("tl", "tl")):
+            value = request.data.get(key)
+            user = get_object_or_404(self.tenant_users(), pk=value) if value else None
+            if user and not has_project_role(user, key):
+                label = "chef de projet" if key == "pm" else "Tech Lead"
+                raise ApiError("VALIDATION_ERROR", f"{user.get_full_name() or user.username} n'a pas le profil {label}.")
+            dates[field] = user
+            if user:
+                members.append(user)
+        project = Project(tenant=self.tenant, id=project_id, code=code, name=name,
+                          client=client, method=str(request.data.get("method", ""))[:20],
+                          descr=str(request.data.get("description", "")), **dates)
+        from projects.workspace import set_project_type
+        set_project_type(project, request.data)
+        project.save()
+        for member in {request.user.pk: request.user, **{u.pk: u for u in members}}.values():
+            ProjectAccess.objects.get_or_create(tenant=self.tenant, project=project, user=member,
+                                                 defaults={"can_edit": True, "granted_by": request.user})
+        audit.record(request.user, f"Projet {project.code}", "Projet créé", "", f"{project.name} · {client.name}")
+        project = Project.objects.select_related("client", "pm", "tl").prefetch_related("actions").get(pk=project.pk)
+        return Response(admin_project_row(project), status=status.HTTP_201_CREATED)
+
+def admin_project_row(p):
+    person = lambda u: {"id": u.id, "name": u.get_full_name() or u.username} if u else None  # noqa: E731
+    return {
+        "id": p.id, "code": p.code, "name": p.name, "client": {"code": p.client_id, "name": p.client.name},
+        "method": p.method, "description": p.descr, "startDate": p.start_date, "endDate": p.end_date,
+        "pm": person(p.pm), "tl": person(p.tl),
+        "projectType": p.project_type, "projectTypeLabel": p.get_project_type_display(),
+        "baseProject": p.base_project_id, "baseVersion": p.base_version, "targetVersion": p.target_version,
+        "actions": [{"id": a.id, "title": a.title, "status": a.status} for a in p.actions.all()],
+    }
+
+
+class AdminProjectDetailView(AdminView):
+    """Modification d'un projet par l'administrateur, notamment l'affectation du chef de projet et du Tech Lead."""
+
+    def patch(self, request, pk):
+        from django.utils.dateparse import parse_date
+
+        project = get_object_or_404(Project.objects.select_related("client", "pm", "tl"), tenant=self.tenant, pk=pk)
+        data, changes = request.data, []
+        if "name" in data:
+            name = str(data.get("name", "")).strip()
+            if not name or len(name) > 200:
+                raise ApiError("VALIDATION_ERROR", "Le nom du projet est obligatoire (200 caractères maximum).")
+            if name != project.name:
+                changes.append(f"nom : {name}")
+                project.name = name
+        if "client" in data:
+            code = str(data.get("client") or "").strip()
+            client = get_object_or_404(Client, tenant=self.tenant, code=code) if code else own_company_client(self.tenant, request.user)
+            if client.pk != project.client_id:
+                changes.append(f"client : {client.name}")
+                project.client = client
+        if "method" in data:
+            project.method = str(data.get("method") or "")[:20]
+        if "description" in data:
+            project.descr = str(data.get("description") or "")
+        for key, field in (("startDate", "start_date"), ("endDate", "end_date")):
+            if key in data:
+                raw = data.get(key) or ""
+                parsed = parse_date(str(raw)) if raw else None
+                if raw and parsed is None:
+                    raise ApiError("VALIDATION_ERROR", "Date invalide.")
+                setattr(project, field, parsed)
+        if project.start_date and project.end_date and project.end_date < project.start_date:
+            raise ApiError("VALIDATION_ERROR", "La date de fin doit être postérieure à la date de début.")
+        if any(k in data for k in ("projectType", "baseProject", "baseVersion", "targetVersion")):
+            from projects.workspace import set_project_type
+            before = project.get_project_type_display()
+            set_project_type(project, data)
+            if before != project.get_project_type_display():
+                changes.append(f"type : {project.get_project_type_display()}")
+        new_members = []
+        for key, label in (("pm", "chef de projet"), ("tl", "Tech Lead")):
+            if key not in data:
+                continue
+            value = data.get(key)
+            user = get_object_or_404(self.tenant_users().filter(is_active=True), pk=value) if value else None
+            if user and not has_project_role(user, key):
+                raise ApiError("VALIDATION_ERROR", f"{user.get_full_name() or user.username} n'a pas le profil {label}.")
+            if getattr(project, f"{key}_id") != (user.pk if user else None):
+                changes.append(f"{label} : {(user.get_full_name() or user.username) if user else 'non affecté'}")
+                setattr(project, key, user)
+                if user:
+                    new_members.append(user)
+        project.save()
+        for member in new_members:
+            ProjectAccess.objects.get_or_create(tenant=self.tenant, project=project, user=member,
+                                                 defaults={"can_edit": True, "granted_by": request.user})
+        if changes:
+            audit.record(request.user, f"Projet {project.code}", "Projet modifié", "", " ; ".join(changes))
+        project = Project.objects.select_related("client", "pm", "tl").prefetch_related("actions").get(pk=project.pk)
+        return Response(admin_project_row(project))
+
+
+class AdminProjectClientsView(AdminView):
+    def get(self, request):
+        if not in_active_tenant(request.user) or not has_perm(request.user, "project", "create"):
+            raise ApiError("FORBIDDEN_PERMISSION", "Vous n'avez pas le droit de créer un projet.", status.HTTP_403_FORBIDDEN)
+        return Response([{"code": c.code, "name": c.name} for c in Client.objects.filter(tenant=self.tenant).order_by("name")])
+
+    def post(self, request):
+        """Ajoute un client au référentiel de l'entreprise (nécessaire avant de créer un projet)."""
+        if not in_active_tenant(request.user) or not (
+                has_perm(request.user, "project", "create") or has_perm(request.user, "client", "create")):
+            raise ApiError("FORBIDDEN_PERMISSION", "Vous n'avez pas le droit d'ajouter un client.", status.HTTP_403_FORBIDDEN)
+        name = str(request.data.get("name", "")).strip()
+        if not name or len(name) > 120:
+            raise ApiError("VALIDATION_ERROR", "Indiquez le nom du client (120 caractères maximum).")
+        if Client.objects.filter(tenant=self.tenant, name__iexact=name).exists():
+            raise ApiError("VALIDATION_ERROR", "Un client porte déjà ce nom dans votre entreprise.")
+        client = Client.objects.create(tenant=self.tenant, code=new_client_code(name), name=name,
+                                       sector=str(request.data.get("sector", "")).strip()[:120],
+                                       city=str(request.data.get("city", "")).strip()[:120])
+        audit.record(request.user, f"Client {client.name}", "Client créé")
+        return Response({"code": client.code, "name": client.name}, status=status.HTTP_201_CREATED)
 
 
 class RoleListView(AdminView):
     def get(self, request):
-        roles = Role.objects.exclude(code=PLATFORM_ROLE).annotate(userCount=Count(
-            "users", filter=Q(users__is_active=True, users__tenant=self.tenant))).order_by("position")
+        visible_roles = Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=self.tenant)).exclude(code=PLATFORM_ROLE)
+        roles = visible_roles.annotate(userCount=Count(
+            "users", filter=Q(users__is_active=True, users__tenant=self.tenant))).order_by("position", "label")
         return Response({
             "modules": [{"code": c, "label": l} for c, l in MODULES],
             "verbs": [{"code": c, "label": l} for c, l in VERBS],
@@ -199,10 +477,40 @@ class RoleListView(AdminView):
                        "userCount": r.userCount, "permissions": permissions_of(r.code, self.tenant)} for r in roles],
         })
 
+    def post(self, request):
+        serializer = RoleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        from accounts.models import RolePermission
+        from django.db import transaction
+        data = serializer.validated_data
+        stem = slugify(data["label"])[:9] or "profil"
+        with transaction.atomic():
+            code = None
+            for _ in range(12):
+                candidate = f"p-{stem}-{secrets.token_hex(3)}"[:20]
+                if not Role.objects.filter(code=candidate).exists():
+                    code = candidate
+                    break
+            if code is None:
+                raise ApiError("VALIDATION_ERROR", "Impossible de générer un identifiant de profil unique.")
+            role = Role.objects.create(code=code, tenant=self.tenant, label=data["label"],
+                                       question=data["question"], internal=data["internal"],
+                                       money=data["money"], margin=data["margin"],
+                                       position=(Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=self.tenant))
+                                                 .order_by("-position").values_list("position", flat=True).first() or 0) + 1)
+            RolePermission.objects.bulk_create([
+                RolePermission(role=role, tenant=self.tenant, module=module)
+                for module, _ in MODULES
+            ])
+        audit.record(request.user, f"Profil {role.label}", "Profil créé", "", "Droits métier refusés par défaut")
+        return Response({"code": role.code, "label": role.label, "internal": role.internal, "money": role.money,
+                         "margin": role.margin, "userCount": 0, "permissions": permissions_of(role.code, self.tenant)},
+                        status=status.HTTP_201_CREATED)
+
 
 class RolePermissionsView(AdminView):
     def put(self, request, code):
-        role = get_object_or_404(Role.objects.exclude(code=PLATFORM_ROLE), pk=code)
+        role = get_object_or_404(Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=self.tenant)).exclude(code=PLATFORM_ROLE), pk=code)
         serializer = PermissionsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         wanted = serializer.validated_data["permissions"]
@@ -219,6 +527,238 @@ class RolePermissionsView(AdminView):
                 diff = lambda f: "".join("1" if x else "0" for x in f)
                 audit.record(request.user, f"Rôle {role.label}", f"Droits « {dict(MODULES)[module]} »", diff(before.get(module, [False] * 5)), diff(flags))
         return Response({"code": code, "permissions": permissions_of(code, self.tenant)})
+
+
+# --------------------------------------------------------------------- connexion SSO OpenID Connect
+class SSOSettingsView(AdminView):
+    """Le tenant configure son fournisseur ; les domaines restent attribués exclusivement par le Pilote."""
+
+    def get(self, request):
+        from accounts.models import Role
+        from tenants.models import TenantDomain
+        connector = SSOConnector.objects.filter(tenant=self.tenant).first()
+        secret = ServiceSecret.objects.filter(tenant=self.tenant, key="sso_client_secret").first()
+        roles = Role.objects.filter(internal=True).filter(Q(tenant__isnull=True) | Q(tenant=self.tenant)).exclude(code__in=["admin", PLATFORM_ROLE]).order_by("position", "label")
+        return Response({
+            "enabled": bool(connector and connector.enabled),
+            "issuer": connector.issuer if connector else "",
+            "clientId": connector.client_id if connector else "",
+            "defaultRole": connector.default_role_id if connector else "",
+            "secretSet": bool(secret),
+            "secretHint": secret.hint if secret else "",
+            "domains": list(TenantDomain.objects.filter(tenant=self.tenant, enabled=True).values_list("domain", flat=True)),
+            "roles": [{"code": role.code, "label": role.label} for role in roles],
+        })
+
+    def put(self, request):
+        serializer = SSOConnectorSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        issuer = data["issuer"].strip().rstrip("/")
+        from urllib.parse import urlparse
+        parsed = urlparse(issuer)
+        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment):
+            raise ApiError("VALIDATION_ERROR", "L’émetteur OIDC doit être une URL HTTPS publique, sans paramètres.")
+        role = get_object_or_404(
+            Role.objects.filter(internal=True).filter(Q(tenant__isnull=True) | Q(tenant=self.tenant))
+                .exclude(code__in=["admin", PLATFORM_ROLE]), pk=data["defaultRole"])
+        if data["enabled"] and not TenantDomain.objects.filter(tenant=self.tenant, enabled=True).exists():
+            raise ApiError("VALIDATION_ERROR", "Le Pilote doit d’abord attribuer un domaine à cette entreprise.")
+        secret_row = ServiceSecret.objects.filter(tenant=self.tenant, key="sso_client_secret").first()
+        client_secret = data.get("clientSecret", "")
+        if data["enabled"] and not (client_secret or secret_row):
+            raise ApiError("VALIDATION_ERROR", "Enregistrez le secret du fournisseur avant d’activer le SSO.")
+        before = "activé" if SSOConnector.objects.filter(tenant=self.tenant, enabled=True).exists() else "désactivé"
+        if client_secret:
+            secret_row = secret_row or ServiceSecret(tenant=self.tenant, key="sso_client_secret")
+            secret_row.set_value(client_secret)
+            secret_row.updated_by = request.user
+            secret_row.save()
+        connector, _ = SSOConnector.objects.update_or_create(
+            tenant=self.tenant,
+            defaults={"issuer": issuer, "client_id": data["clientId"], "default_role": role,
+                      "enabled": data["enabled"], "updated_by": request.user},
+        )
+        audit.record(request.user, "Connexion SSO", "Configuration modifiée", before,
+                     "activée" if connector.enabled else "désactivée", tenant=self.tenant)
+        return self.get(request)
+
+
+class TimeTrackingSettingsView(AdminView):
+    def get(self, request):
+        row = AppSetting.objects.filter(tenant=self.tenant, key="time").first()
+        value = row.value if row and isinstance(row.value, dict) else {}
+        from projects.time_approval import DEFAULT_MODE, MODES
+        return Response({"unit": value.get("entryUnit", "hour"), "hoursPerDay": value.get("hpd", 8),
+                         "clientVisible": value.get("clientVisible", True),
+                         "approval": value.get("approval", DEFAULT_MODE) if value.get("approval") in MODES else DEFAULT_MODE,
+                         "approvalModes": [{"code": c, "label": l} for c, l in MODES.items()],
+                         "clientApproval": bool(value.get("clientApproval", False))})
+
+    def put(self, request):
+        unit = request.data.get("unit")
+        client_visible = request.data.get("clientVisible", True)
+        try:
+            hours_per_day = float(request.data.get("hoursPerDay", 8))
+        except (TypeError, ValueError):
+            raise ApiError("VALIDATION_ERROR", "Le nombre d'heures par journée est invalide.")
+        if unit not in {"hour", "day"} or not isinstance(client_visible, bool) or not 1 <= hours_per_day <= 24:
+            raise ApiError("VALIDATION_ERROR", "Choisissez une unité valide et entre 1 et 24 heures par jour.")
+        from projects.time_approval import DEFAULT_MODE, MODES
+        row = AppSetting.objects.filter(tenant=self.tenant, key="time").first()
+        value = row.value.copy() if row and isinstance(row.value, dict) else {}
+        approval = request.data.get("approval", value.get("approval", DEFAULT_MODE))
+        if approval not in MODES:
+            raise ApiError("VALIDATION_ERROR", "Circuit de validation inconnu.")
+        if approval != value.get("approval", DEFAULT_MODE):
+            audit.record(request.user, "Saisie de temps", "Circuit de validation modifié",
+                         MODES.get(value.get("approval", DEFAULT_MODE), ""), MODES[approval], tenant=self.tenant)
+        client_approval = bool(request.data.get("clientApproval", value.get("clientApproval", False)))
+        if client_approval != bool(value.get("clientApproval", False)):
+            audit.record(request.user, "Saisie de temps", "Validation client des temps",
+                         str(bool(value.get("clientApproval", False))), str(client_approval), tenant=self.tenant)
+        value.update({"entryUnit": unit, "hpd": hours_per_day, "clientVisible": client_visible, "approval": approval,
+                      "clientApproval": client_approval})
+        AppSetting.objects.update_or_create(tenant=self.tenant, key="time", defaults={"value": value})
+        audit.record(request.user, "Saisie de temps", "Règles de saisie modifiées", "", f"{unit} · {hours_per_day} h/jour · client {'visible' if client_visible else 'masqué'}", tenant=self.tenant)
+        return self.get(request)
+
+
+class SSOAccessRequestView(APIView):
+    permission_classes = [permissions.IsAuthenticated, TenantIsActive, LicenseIsValid, PasswordChangeNotRequired]
+
+    def _allowed(self, request):
+        return bool(request.user.tenant_id and has_capability(request.user, "users.approve_sso"))
+
+    def get(self, request):
+        if not self._allowed(request):
+            return Response({"detail": "Vous n'êtes pas habilité à traiter les demandes SSO."}, status=status.HTTP_403_FORBIDDEN)
+        rows = SSOAccessRequest.objects.filter(tenant=request.user.tenant).select_related("reviewed_by")
+        roles = Role.objects.filter(internal=True).filter(Q(tenant__isnull=True) | Q(tenant=request.user.tenant)).exclude(code__in=["admin", PLATFORM_ROLE]).order_by("position", "label")
+        from .client_domains import client_for_email
+        ext = Role.objects.filter(internal=False).filter(Q(tenant__isnull=True) | Q(tenant=request.user.tenant)).order_by("position", "label")
+        out = []
+        for row in rows:
+            c = client_for_email(request.user.tenant, row.email)
+            out.append({"id": row.pk, "email": row.email, "firstName": row.first_name, "lastName": row.last_name,
+                        "status": row.status, "requestedAt": row.requested_at, "reviewedAt": row.reviewed_at,
+                        "reviewedBy": row.reviewed_by.username if row.reviewed_by else None,
+                        "client": c.code if c else None, "clientName": c.name if c else None})
+        return Response({"requests": out,
+                         "roles": [{"code": role.code, "label": role.label} for role in roles]
+                         + [{"code": role.code, "label": f"{role.label} (externe)", "external": True} for role in ext]})
+
+    @transaction.atomic
+    def post(self, request, pk=None):
+        if not self._allowed(request):
+            return Response({"detail": "Vous n'êtes pas habilité à traiter les demandes SSO."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            item = SSOAccessRequest.objects.select_for_update().get(pk=pk, tenant=request.user.tenant)
+        except SSOAccessRequest.DoesNotExist:
+            from django.http import Http404
+            raise Http404
+        if item.status != SSOAccessRequest.PENDING:
+            return Response({"detail": "Cette demande a déjà été traitée."}, status=status.HTTP_409_CONFLICT)
+        action = request.data.get("action")
+        if action not in {"approve", "reject"}:
+            return Response({"detail": "Choisissez accepter ou refuser."}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "approve":
+            from .client_domains import client_for_email
+            domain_client = client_for_email(request.user.tenant, item.email)
+            roles_qs = Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=request.user.tenant))
+            role = get_object_or_404(roles_qs if domain_client else roles_qs.filter(internal=True), code=request.data.get("role"))
+            if role.code in {"admin", PLATFORM_ROLE}:
+                return Response({"detail": "Un profil administrateur ne peut pas être attribué par cette demande."}, status=status.HTTP_400_BAD_REQUEST)
+            if not TenantDomain.objects.filter(tenant=request.user.tenant, enabled=True,
+                                               domain=item.email.rsplit("@", 1)[-1].lower()).exists():
+                return Response({"detail": "Le domaine n'est plus autorisé par le Pilote."}, status=status.HTTP_409_CONFLICT)
+            user = User.objects.filter(email__iexact=item.email).first()
+            if user and (user.tenant_id != request.user.tenant_id or not user.is_active):
+                return Response({"detail": "Cette adresse est déjà rattachée à un autre compte."}, status=status.HTTP_409_CONFLICT)
+            if user is None:
+                from accounts.sso import _username
+                user = User(username=_username(item.email, request.user.tenant), email=item.email,
+                            first_name=item.first_name, last_name=item.last_name,
+                            tenant=request.user.tenant, role=role, is_active=True, must_change_password=False,
+                            client=None if role.internal else domain_client)
+                user.set_unusable_password()
+                user.save()
+            else:
+                user.role = role
+                user.client = None if role.internal else (domain_client or user.client)
+                user.save(update_fields=["role", "client"])
+            identity, created = SSOIdentity.objects.get_or_create(
+                issuer=item.issuer, subject=item.subject,
+                defaults={"tenant": request.user.tenant, "user": user, "email": item.email},
+            )
+            if not created and (identity.user_id != user.pk or identity.tenant_id != request.user.tenant_id):
+                return Response({"detail": "Cette identité SSO est déjà rattachée à un autre compte."}, status=status.HTTP_409_CONFLICT)
+            item.user = user
+            item.status = SSOAccessRequest.APPROVED
+        else:
+            item.status = SSOAccessRequest.REJECTED
+        item.reviewed_by = request.user
+        item.reviewed_at = timezone.now()
+        item.save(update_fields=["user", "status", "reviewed_by", "reviewed_at"])
+        audit.record(request.user, f"Demande SSO {item.email}", "Demande d'accès acceptée" if action == "approve" else "Demande d'accès refusée",
+                     "En attente", item.status, tenant=request.user.tenant)
+        return Response({"id": item.pk, "email": item.email, "status": item.status,
+                         "reviewedAt": item.reviewed_at, "reviewedBy": request.user.username})
+
+
+class UserAccessChangeRequestView(APIView):
+    permission_classes = [permissions.IsAuthenticated, TenantIsActive, LicenseIsValid, PasswordChangeNotRequired]
+
+    def get(self, request):
+        is_admin = request.user.is_app_admin
+        if not is_admin and not has_capability(request.user, "users.request_access_change"):
+            return Response({"detail": "Vous n'êtes pas habilité à consulter les demandes d'accès."}, status=403)
+        rows = UserAccessChangeRequest.objects.filter(tenant=request.user.tenant)
+        if not is_admin:
+            rows = rows.filter(requested_by=request.user)
+        rows = rows.select_related("user", "requested_by", "requested_role", "reviewed_by")[:100]
+        roles = Role.objects.filter(internal=True).filter(Q(tenant__isnull=True) | Q(tenant=request.user.tenant)).exclude(code__in=["admin", PLATFORM_ROLE]).order_by("position", "label")
+        return Response({"requests": [{"id": row.pk, "user": row.user_id, "username": row.user.username,
+            "email": row.user.email, "requestedBy": row.requested_by.username, "requestedRole": row.requested_role_id,
+            "reason": row.reason, "status": row.status, "requestedAt": row.requested_at,
+            "reviewedBy": row.reviewed_by.username if row.reviewed_by else None} for row in rows],
+            "roles": [{"code": role.code, "label": role.label} for role in roles],
+            "users": list(User.objects.filter(tenant=request.user.tenant, is_active=True).order_by("username").values("id", "username", "email")) if not is_admin else []})
+
+    def post(self, request, pk=None):
+        if pk is None:
+            if request.user.is_app_admin or not has_capability(request.user, "users.request_access_change"):
+                return Response({"detail": "Vous n'êtes pas habilité à déposer une demande."}, status=403)
+            user = get_object_or_404(User.objects.filter(tenant=request.user.tenant, is_active=True), pk=request.data.get("user"))
+            role = get_object_or_404(Role.objects.filter(internal=True).filter(Q(tenant__isnull=True) | Q(tenant=request.user.tenant)).exclude(code__in=["admin", PLATFORM_ROLE]), pk=request.data.get("role"))
+            reason = str(request.data.get("reason", "")).strip()[:500]
+            if not reason:
+                return Response({"detail": "Expliquez la raison du changement demandé."}, status=400)
+            item = UserAccessChangeRequest.objects.create(tenant=request.user.tenant, user=user,
+                requested_by=request.user, requested_role=role, reason=reason)
+            audit.record(request.user, f"Accès de {user.username}", "Demande de changement d'accès", user.role_id, role.code, tenant=request.user.tenant)
+            return Response({"id": item.pk, "status": item.status}, status=201)
+        if not request.user.is_app_admin:
+            return Response({"detail": "Seul un administrateur peut valider ces changements."}, status=403)
+        with transaction.atomic():
+            item = get_object_or_404(UserAccessChangeRequest.objects.select_for_update().filter(tenant=request.user.tenant), pk=pk)
+            if item.status != "pending":
+                return Response({"detail": "Cette demande a déjà été traitée."}, status=409)
+            action = request.data.get("action")
+            if action not in {"approve", "reject"}:
+                return Response({"detail": "Choisissez accepter ou refuser."}, status=400)
+            if action == "approve":
+                role = get_object_or_404(Role.objects.filter(internal=True).filter(Q(tenant__isnull=True) | Q(tenant=request.user.tenant)).exclude(code__in=["admin", PLATFORM_ROLE]), pk=request.data.get("role", item.requested_role_id))
+                item.user.role = role
+                item.user.save(update_fields=["role"])
+                item.status = "approved"
+            else:
+                item.status = "rejected"
+            item.reviewed_by, item.reviewed_at = request.user, timezone.now()
+            item.save(update_fields=["status", "reviewed_by", "reviewed_at"])
+            audit.record(request.user, f"Accès de {item.user.username}", "Demande de changement acceptée" if action == "approve" else "Demande de changement refusée",
+                         item.user.role_id, item.status, tenant=request.user.tenant)
+        return Response({"id": item.pk, "status": item.status})
 
 
 # --------------------------------------------------------------------- base de données
@@ -265,6 +805,48 @@ class DatabaseTestView(PlatformView):
         result = database_status()
         audit.record(request.user, "Base de données", "Test de connexion", "", "réussi" if result["connected"] else "échec", tenant=None)
         return Response(result, status=status.HTTP_200_OK if result["connected"] else status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+class SupportSaaSReportView(APIView):
+    """Supervision globale en lecture seule, accessible au Pilote et au support Control Tower."""
+    permission_classes = [permissions.IsAuthenticated, PasswordChangeNotRequired, IsPlatformSupport]
+
+    def get(self, request):
+        from tenants.models import Tenant
+        from django.conf import settings
+        since = timezone.now() - timedelta(hours=24)
+        logs = ApiRequestLog.objects.filter(at__gte=since)
+        totals = logs.aggregate(requests=Count("id"), errors=Count("id", filter=Q(status__gte=500)),
+                                clientErrors=Count("id", filter=Q(status__gte=400, status__lt=500)), avg=Avg("duration_ms"))
+        tenants = Tenant.objects.all()
+        return Response({"database": database_status(), "tenants": {"total": tenants.count(), "active": tenants.filter(status="active").count(),
+                         "suspended": tenants.filter(status="suspended").count()},
+                         "api24h": {"requests": totals["requests"] or 0, "serverErrors": totals["errors"] or 0,
+                                    "clientErrors": totals["clientErrors"] or 0, "avgMs": round(totals["avg"] or 0, 1)},
+                         "deployment": "serverless" if getattr(settings, "ON_VERCEL", False) else "process",
+                         "restartAvailable": False,
+                         "restartMessage": "Le redémarrage doit être effectué depuis l’hébergeur du service; cette application ne dispose pas d’une commande d’exploitation sécurisée."})
+
+
+class SupportTenantListView(APIView):
+    permission_classes = [permissions.IsAuthenticated, PasswordChangeNotRequired, IsPlatformSupport]
+
+    def get(self, request):
+        from tenants.models import Tenant
+        return Response([{"id": t.pk, "name": t.name, "status": t.status} for t in Tenant.objects.order_by("name")])
+
+
+class AdminSaaSReportView(AdminView):
+    def get(self, request):
+        since = timezone.now() - timedelta(hours=24)
+        logs = ApiRequestLog.objects.filter(tenant=self.tenant, at__gte=since)
+        totals = logs.aggregate(requests=Count("id"), errors=Count("id", filter=Q(status__gte=500)),
+                                clientErrors=Count("id", filter=Q(status__gte=400, status__lt=500)), avg=Avg("duration_ms"))
+        return Response({"tenant": self.tenant.name,
+                         "api24h": {"requests": totals["requests"] or 0, "serverErrors": totals["errors"] or 0,
+                                    "clientErrors": totals["clientErrors"] or 0, "avgMs": round(totals["avg"] or 0, 1)},
+                         "restartAvailable": False,
+                         "restartMessage": "Le redémarrage des services est réservé à l’exploitation de la plateforme."})
 
 
 # --------------------------------------------------------------------- API : état, journal, jetons, secrets
@@ -542,7 +1124,7 @@ class CapabilityMatrixView(AdminView):
         granted = {}
         for rc in RoleCapability.objects.filter(tenant=self.tenant):
             granted.setdefault(rc.role_id, set()).add(rc.code)
-        roles = Role.objects.exclude(code=PLATFORM_ROLE).order_by("position")
+        roles = Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=self.tenant)).exclude(code=PLATFORM_ROLE).order_by("position", "label")
         return Response({
             "catalog": [{"code": c, "domain": d, "action": a, "delegable": c not in NOT_DELEGABLE} for c, d, a in CATALOG],
             "roles": [{"code": r.code, "label": r.label, "locked": r.code == "admin",
@@ -558,7 +1140,7 @@ class CapabilityMatrixView(AdminView):
             raise ApiError("VALIDATION_ERROR", "Format attendu : {\"roles\": {code_du_rôle: [droits]}}.")
         if "admin" in wanted or PLATFORM_ROLE in wanted:
             raise ApiError("VALIDATION_ERROR", "Les droits de l'administrateur et du Pilote ne se modifient pas.")
-        roles = set(Role.objects.exclude(code__in=["admin", PLATFORM_ROLE]).values_list("code", flat=True))
+        roles = set(Role.objects.filter(Q(tenant__isnull=True) | Q(tenant=self.tenant)).exclude(code__in=["admin", PLATFORM_ROLE]).values_list("code", flat=True))
         for role, codes in wanted.items():
             if role not in roles or not isinstance(codes, list) or set(codes) - CODES:
                 raise ApiError("VALIDATION_ERROR", "Rôle ou droit inconnu.", details=[role])
@@ -644,4 +1226,6 @@ class CronMaintenanceView(APIView):
         call_command("process_calendar", stdout=out)
         call_command("sync_teams", stdout=out)
         call_command("process_methodology", stdout=out)
+        call_command("remind_timesheets", stdout=out)
+        call_command("generate_cra", stdout=out)
         return Response({"done": True, "report": out.getvalue().strip().splitlines()})

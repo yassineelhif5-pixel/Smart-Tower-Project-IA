@@ -1627,6 +1627,24 @@ svg.chart .grid line {
   outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
   border-color: var(--accent);
 }
+.password-field {
+  position: relative;
+  width: 100%;
+}
+.password-input {
+  padding-right: 76px;
+}
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  border: 0;
+  padding: 4px 2px;
+  background: transparent;
+  color: var(--accent);
+  font: 500 12px var(--f-mono);
+}
 textarea.inp {
   min-height: 70px;
   resize: vertical;

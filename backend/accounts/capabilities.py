@@ -21,6 +21,8 @@ CATALOG = [
     ("users.create", "Utilisateurs", "Créer"),
     ("users.update", "Utilisateurs", "Modifier"),
     ("users.activate", "Utilisateurs", "Activer / désactiver"),
+    ("users.approve_sso", "Demandes d'accès SSO", "Accepter ou refuser"),
+    ("users.request_access_change", "Demandes de changement d'accès", "Demander une modification"),
     ("roles.administer", "Rôles et permissions", "Administrer"),
     ("licenses.view", "Licences", "Consulter"),
     ("licenses.assign", "Licences", "Attribuer"),
@@ -40,7 +42,9 @@ NOT_DELEGABLE = {"roles.administer"}
 DEFAULTS = {
     "license_manager": ["company.view", "users.view", "licenses.view", "licenses.assign", "licenses.release",
                         "sessions.view", "requests.view", "requests.create", "requests.cancel"],
-    "manager": ["company.view", "users.view"],
+    "manager": ["company.view", "users.view", "users.approve_sso", "users.request_access_change"],
+    "cdp": ["company.view", "users.view", "users.request_access_change"],
+    "techlead": ["company.view", "users.view", "users.request_access_change"],
     "direction": ["company.view", "users.view", "licenses.view", "requests.view", "audit.view"],
 }
 
@@ -81,6 +85,10 @@ def has_capability(user, code):
         raise ValueError(f"Droit inconnu : {code}")
     if not (user and user.is_authenticated and user.is_active and user.tenant_id and user.tenant.status == "active"):
         return False
+    policy = pilot_access_policy(user)
+    permitted_roles = (policy.get("capabilityRoles", {}).get(code) if isinstance(policy, dict) else None)
+    if isinstance(permitted_roles, list) and user.role_id not in permitted_roles:
+        return False
     if user.role_id == ADMIN_ROLE:
         return True  # l'administrateur du tenant garde tous les droits : aucun verrouillage possible
     override = UserCapability.objects.filter(user=user, tenant_id=user.tenant_id, code=code).first()
@@ -91,3 +99,14 @@ def has_capability(user, code):
 
 def capabilities_of(user):
     return sorted(c for c in CODES if has_capability(user, c))
+
+
+def pilot_access_policy(user):
+    """Politique d'accès posée par le Pilote, mise en cache pendant la requête."""
+    if not user or not getattr(user, "tenant_id", None):
+        return {}
+    if not hasattr(user, "_pilot_access_policy_cache"):
+        from configuration.models import AppSetting
+        row = AppSetting.objects.filter(tenant_id=user.tenant_id, key="pilot_access_policy").first()
+        user._pilot_access_policy_cache = row.value if row and isinstance(row.value, dict) else {}
+    return user._pilot_access_policy_cache

@@ -85,6 +85,20 @@ class PersonCapacity(TenantOwned):
 
 
 # --------------------------------------------------------------------------- projets
+PROJECT_TYPES = [
+    ("new", "Nouveau projet (from scratch)"),
+    ("evolution", "Évolution (nouvelle version)"),
+    ("improvement", "Amélioration d'une version existante"),
+    ("bugfix", "Correction d'incidents"),
+    ("restoration", "Restauration / reprise"),
+    ("migration", "Migration (technique ou de données)"),
+    ("maintenance", "Maintenance / TMA"),
+    ("integration", "Intégration / déploiement"),
+    ("audit", "Audit / conseil"),
+    ("other", "Autre"),
+]
+
+
 class Project(TenantOwned):
     tenant_source = ['client', 'pm', 'tl']
 
@@ -101,6 +115,25 @@ class Project(TenantOwned):
     # Lot 2b (projects) :
     team = models.ManyToManyField(USER, blank=True, related_name="team_projects")
     descr = models.TextField(blank=True)
+    # Nature du projet : nouveau projet, évolution (modification) ou amélioration d'un projet existant.
+    project_type = models.CharField(max_length=12, choices=PROJECT_TYPES, default="new")
+    base_project = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    # Dépendances entre projets : programme / sous-projet et projets prérequis.
+    parent = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="children",
+                               help_text="Projet parent (programme) dont ce projet est un sous-projet")
+    depends_on = models.ManyToManyField("self", symmetrical=False, blank=True, related_name="dependents",
+                                        help_text="Projets dont celui-ci dépend (prérequis)")
+    # Projets de migration : outil source → outil cible et statut global.
+    mig_source = models.CharField(max_length=120, blank=True, help_text="Outil / système source (migration)")
+    mig_target = models.CharField(max_length=120, blank=True, help_text="Outil / système cible (migration)")
+    mig_status = models.CharField(max_length=20, blank=True, help_text="Statut global de la migration")
+    # Cycle de vie du projet : en cours (par défaut), en pause, clôturé.
+    status = models.CharField(max_length=10, choices=[("active", "En cours"), ("paused", "En pause"), ("closed", "Clôturé")], default="active")
+    closed_at = models.DateField(null=True, blank=True)
+    # Natures du projet, combinables : build, support, migration, run, autre.
+    natures = models.JSONField(default=list, blank=True)
+    base_version = models.CharField(max_length=40, blank=True, help_text="Version source (existante)")
+    target_version = models.CharField(max_length=40, blank=True, help_text="Version cible (à livrer)")
     forecast_end = models.DateField(null=True, blank=True)
     phases = models.JSONField(default=list, blank=True, help_text="Planning macro")
     milestones = models.JSONField(default=list, blank=True)
@@ -192,6 +225,10 @@ class Action(TenantOwned):
     us = models.ForeignKey(UserStory, on_delete=models.SET_NULL, null=True, blank=True, related_name="actions")
     done_at = models.DateField(null=True, blank=True)
     history = models.JSONField(default=list, blank=True)
+    # Prédécesseurs : l'action ne peut démarrer qu'après eux (même projet ou autre projet).
+    depends_on = models.ManyToManyField("self", symmetrical=False, blank=True, related_name="successors")
+    # Projets de migration : action propre à une instance (vide = action globale du projet).
+    instance = models.ForeignKey("MigrationInstance", on_delete=models.SET_NULL, null=True, blank=True, related_name="actions")
 
     class Meta:
         ordering = ["id"]
@@ -252,11 +289,61 @@ class TimeEntry(TenantOwned):
     work_date = models.DateField()
     hours = models.DecimalField(max_digits=6, decimal_places=2)
     is_meeting = models.BooleanField(default=False)
+    approval_status = models.CharField(max_length=10, choices=[("draft", "Brouillon"), ("pending", "À valider"), ("client", "Chez le client"), ("approved", "Validé"), ("rejected", "Refusé")], default="pending")
+    # Ligne de saisie du projet (activité paramétrée par le client ou l'administrateur), vide si non utilisée.
+    line = models.CharField(max_length=40, blank=True, default="")
+    # Étape courante du workflow de validation propre au projet (0 = premier valideur).
+    approval_step = models.PositiveSmallIntegerField(default=0)
+    approved_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_time_entries")
+    approved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["work_date", "id"]
         indexes = [models.Index(fields=["person", "work_date"]), models.Index(fields=["project"])]
         constraints = [models.CheckConstraint(condition=models.Q(hours__gt=0), name="time_hours_positive")]
+
+
+ABSENCE_KINDS = [("cp", "Congés payés"), ("rtt", "RTT"), ("sick", "Maladie"), ("training", "Formation"),
+                 ("holiday", "Jour férié"), ("unpaid", "Congé sans solde"), ("other", "Autre absence")]
+
+
+class TimeAbsence(TenantOwned):
+    """Absence déclarée dans la feuille de temps (complète la journée avec les temps de présence)."""
+
+    tenant_source = ['person']
+
+    person = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="time_absences")
+    work_date = models.DateField()
+    kind = models.CharField(max_length=10, choices=ABSENCE_KINDS)
+    hours = models.DecimalField(max_digits=5, decimal_places=2)
+    status = models.CharField(max_length=10, choices=[("draft", "Brouillon"), ("submitted", "Envoyée")], default="draft")
+
+    class Meta:
+        ordering = ["work_date", "id"]
+        constraints = [models.UniqueConstraint(fields=["person", "work_date", "kind"], name="absence_unique_day_kind")]
+
+
+class TimeApprovalDelegation(TenantOwned):
+    """Délégation de validation des temps pendant une absence : le délégué valide à la place du délégant,
+    du premier au dernier jour inclus. Le délégant garde son propre droit de valider."""
+
+    tenant_source = ['delegator', 'delegate']
+
+    delegator = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="time_delegations_given")
+    delegate = models.ForeignKey(USER, on_delete=models.CASCADE, related_name="time_delegations_received")
+    start_date = models.DateField()
+    end_date = models.DateField()
+    reason = models.CharField(max_length=200, blank=True)
+    created_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-start_date", "-id"]
+        indexes = [models.Index(fields=["delegator", "start_date", "end_date"], name="time_deleg_period_idx")]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(end_date__gte=models.F("start_date")), name="time_delegation_dates"),
+            models.CheckConstraint(condition=~models.Q(delegator=models.F("delegate")), name="time_delegation_not_self"),
+        ]
 
 
 # --------------------------------------------------------------------------- contrôle
@@ -373,6 +460,14 @@ class Document(TenantOwned):
     version = models.PositiveIntegerField(default=1)
     scan_status = models.CharField(max_length=30, blank=True)
     client_visible = models.BooleanField(default=False)
+    # Fichier stocké en base (10 Mo maximum) : fonctionne en local comme sur Vercel, sans service de stockage.
+    content = models.BinaryField(null=True, blank=True, editable=False)
+    mime = models.CharField(max_length=100, blank=True)
+    size_bytes = models.PositiveIntegerField(null=True, blank=True)
+    description = models.TextField(blank=True)
+    # Lecture automatique (extraction de texte / OCR) et classification par mots-clés.
+    extracted_text = models.TextField(blank=True)
+    extraction = models.JSONField(default=dict, blank=True)
 
     class Meta:
         ordering = ["id"]
@@ -414,6 +509,8 @@ class ProjectAccess(TenantOwned):
     can_edit = models.BooleanField(default=True)
     granted_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     granted_at = models.DateTimeField(auto_now_add=True)
+    daily_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True,
+                                     help_text="TJM du membre sur ce projet (calcul de la consommation du budget)")
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["user", "project"], name="uniq_user_project")]
@@ -432,3 +529,37 @@ class ActionAccess(TenantOwned):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["user", "action"], name="uniq_user_action")]
+
+
+MIGRATION_STATUSES = [
+    ("not_started", "Non démarrée"), ("preparing", "Préparation"), ("extracting", "Extraction"), ("migrating", "Migration en cours"),
+    ("testing", "Recette"), ("cutover", "Bascule"), ("done", "Terminée"), ("blocked", "Bloquée"), ("cancelled", "Annulée"),
+]
+
+
+class MigrationInstance(TenantOwned):
+    """Instance (site, filiale, environnement…) d'un projet de migration, avec son propre planning et son suivi."""
+
+    tenant_source = "project"
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="instances")
+    name = models.CharField(max_length=120)
+    code = models.CharField(max_length=40, blank=True)
+    description = models.TextField(blank=True)
+    is_pilot = models.BooleanField(default=False)
+    source_tool = models.CharField(max_length=120, blank=True)
+    target_tool = models.CharField(max_length=120, blank=True)
+    owner = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    status = models.CharField(max_length=20, choices=MIGRATION_STATUSES, default="not_started")
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    cutover_date = models.DateField(null=True, blank=True)
+    objects_total = models.IntegerField(default=0)
+    objects_migrated = models.IntegerField(default=0)
+    objects_failed = models.IntegerField(default=0)
+    order = models.IntegerField(default=0)
+    notes = models.TextField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order", "id"]

@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.http import HttpResponseRedirect
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework import permissions, status
@@ -12,6 +13,46 @@ from licensing import services as license_services
 
 from .permissions import LicenseIsValid, TenantIsActive
 from .serializers import ChangePasswordSerializer, LoginSerializer, MeSerializer
+
+
+class SSOStartView(APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "sso_start"
+
+    def get(self, request):
+        from .sso import SSOError, begin
+        try:
+            url = begin(request, request.query_params.get("email", ""), request.query_params.get("provider", ""))
+            return HttpResponseRedirect(url)
+        except (SSOError, ValueError):
+            return HttpResponseRedirect("/?sso=error")
+
+
+class SSOCallbackView(APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        from .sso import SSOError, finish
+        state = request.query_params.get("state", "")
+        try:
+            user = finish(request, request.query_params.get("code", ""), state)
+            if user is None:
+                return HttpResponseRedirect("/?sso=pending")
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+            request.session.save()
+            try:
+                license_services.open_session(user, request.session.session_key)
+            except license_services.LicenseError as exc:
+                logout(request)
+                audit.record(user, f"Utilisateur {user.username}", "Connexion SSO refusée (licence)", "", exc.code, result="denied")
+                return HttpResponseRedirect("/?sso=unavailable")
+            audit.record(user, f"Utilisateur {user.username}", "Connexion SSO")
+            return HttpResponseRedirect("/")
+        except (SSOError, ValueError):
+            return HttpResponseRedirect("/?sso=error")
 
 
 @method_decorator(ensure_csrf_cookie, name="get")
@@ -36,6 +77,8 @@ class LoginView(APIView):
         data = LoginSerializer(data=request.data)
         data.is_valid(raise_exception=True)
         user = authenticate(request, username=data.validated_data["username"], password=data.validated_data["password"])
+        if user is not None and user.auth_mode == "sso":
+            user = None
         if user is None:
             audit.record(None, f"Utilisateur {data.validated_data['username'][:60]}", "Connexion refusée", result="failure")
             # Même message que le compte existe ou non.
@@ -43,7 +86,7 @@ class LoginView(APIView):
         if user.tenant_id and user.tenant.status != "active":
             audit.record(None, f"Utilisateur {user.username}", "Connexion refusée (organisation inactive)", tenant=user.tenant, result="denied")
             raise TenantInactive()
-        if not (user.tenant_id or user.is_platform_admin):
+        if not (user.tenant_id or user.is_platform_admin or user.is_platform_support):
             # Compte sans tenant qui n'est pas super administrateur : configuration incohérente, accès refusé.
             raise ApiError("INVALID_CREDENTIALS", "Identifiant ou mot de passe incorrect.", status.HTTP_401_UNAUTHORIZED)
         login(request, user)

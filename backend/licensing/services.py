@@ -5,6 +5,10 @@ les lignes concernées (SELECT … FOR UPDATE). La réservation d'une licence co
 libre avec SKIP LOCKED : deux connexions simultanées ne peuvent jamais obtenir la même. Des contraintes
 d'unicité en base (une session ouverte par licence, un titulaire par licence) servent de dernier rempart.
 """
+import hashlib
+import re
+import secrets
+import uuid
 from datetime import date, timedelta
 
 from django.conf import settings
@@ -34,6 +38,14 @@ class LicenseError(Exception):
 
 def today():
     return timezone.localdate()
+
+
+def maintenance_enabled(tenant):
+    if tenant is None:
+        return False
+    entitlement = L.MaintenanceEntitlement.objects.filter(tenant=tenant, enabled=True).first()
+    return bool(entitlement and (not entitlement.starts_at or entitlement.starts_at <= today())
+                and (not entitlement.ends_at or entitlement.ends_at >= today()))
 
 
 # --------------------------------------------------------------------------- abonnement
@@ -84,7 +96,7 @@ def module_enabled(tenant, module):
     sub = current_subscription(tenant) if is_enforced(tenant) else None
     if sub is None:
         return True
-    features = sub.offer_version.features or []
+    features = sub.module_features if sub.module_features is not None else (sub.offer_version.features or [])
     return not features or module in features
 
 
@@ -128,6 +140,55 @@ def create_subscription(*, by, tenant, version, start_date=None, end_date=None, 
     for kind, qty in ((L.NAMED, version.named_licenses), (L.CONCURRENT, version.concurrent_licenses)):
         if qty:
             allocate(by=by, tenant=tenant, kind=kind, delta=qty, reason=f"Stock initial de l'offre {version}", subscription=sub)
+    return sub
+
+
+@transaction.atomic
+def activate_offer(*, by, tenant, version, reason="Changement d'offre", features=None):
+    """Active une version approuvée/vouchée en conservant l'historique et les licences nominatives utilisées."""
+    if not version.is_published or not version.offer.is_active:
+        raise LicenseError("VALIDATION_ERROR", "Cette version d'offre n'est pas publiée ou l'offre est désactivée.")
+    if features is not None:
+        from accounts.models import MODULES
+        allowed = set(version.features or [code for code, _ in MODULES] + ["ocr", "assistant", "maintenance"])
+        if not set(features).issubset(allowed):
+            raise LicenseError("VALIDATION_ERROR", "Le voucher ne peut pas ajouter un module absent de l'offre.")
+    tenant = Tenant.objects.select_for_update().get(pk=tenant.pk)
+    assigned_named = L.License.objects.filter(tenant=tenant, kind=L.NAMED, status=L.ASSIGNED).count()
+    if assigned_named > version.named_licenses:
+        raise LicenseError(
+            "OFFER_DOWNGRADE_BLOCKED",
+            f"L'entreprise utilise {assigned_named} licences nominatives ; la nouvelle offre n'en prévoit que {version.named_licenses}. Libérez des licences avant le changement.",
+            409,
+        )
+    old = current_subscription(tenant)
+    if old is not None:
+        end_tenant_sessions(tenant, "replaced")
+        change_subscription(by=by, sub=old, status=L.CANCELLED, reason=reason[:300] or "Changement d'offre")
+    else:
+        old = L.Subscription.objects.filter(tenant=tenant).order_by("-id").first()
+        end_tenant_sessions(tenant, "replaced")
+    # Retire le stock libre de l'ancienne formule avant de créer le nouveau, sans toucher aux licences nominatives utilisées.
+    for kind in (L.NAMED, L.CONCURRENT):
+        free_count = L.License.objects.filter(tenant=tenant, kind=kind, status=L.AVAILABLE).count()
+        if free_count:
+            allocate(by=by, tenant=tenant, kind=kind, delta=-free_count,
+                     reason=f"Fin de l'ancienne offre · {reason}"[:300], subscription=old)
+    start = today()
+    end_date = start + timedelta(days=version.duration_days) if version.duration_days else None
+    trial_end = start + timedelta(days=version.trial_days) if version.trial_days else None
+    sub = L.Subscription.objects.create(
+        tenant=tenant, offer_version=version, start_date=start, end_date=end_date, trial_end=trial_end,
+        status=L.TRIAL if trial_end else L.ACTIVE, created_by=by, module_features=features,
+    )
+    named_to_add = version.named_licenses - assigned_named
+    if named_to_add:
+        allocate(by=by, tenant=tenant, kind=L.NAMED, delta=named_to_add,
+                 reason=f"Stock initial de l'offre {version}", subscription=sub)
+    if version.concurrent_licenses:
+        allocate(by=by, tenant=tenant, kind=L.CONCURRENT, delta=version.concurrent_licenses,
+                 reason=f"Stock initial de l'offre {version}", subscription=sub)
+    audit.record(by, f"Abonnement {version}", "Offre activée", "", f"du {start} au {end_date or 'sans terme'}", tenant=tenant)
     return sub
 
 
@@ -378,6 +439,75 @@ PILOT_MOVES = {
 QUANTITY_KINDS = {"named", "concurrent", "quota"}
 
 
+def issue_voucher_codes(*, by, version, quantity, target_tenant, expires_at=None, features=None, request=None):
+    """Crée un lot de codes aléatoires ; les valeurs en clair ne sont retournées qu'une seule fois."""
+    if not version.is_published or not version.offer.is_active:
+        raise LicenseError("VALIDATION_ERROR", "Choisissez une version publiée d'une offre active.")
+    if target_tenant.status != "active":
+        raise LicenseError("VALIDATION_ERROR", "Le client doit être actif pour recevoir un voucher.")
+    if request and (request.tenant_id != target_tenant.pk or request.kind != "offer" or request.status not in (L.APPROVED, L.PARTIALLY_APPROVED)):
+        raise LicenseError("VALIDATION_ERROR", "La demande liée doit être approuvée et appartenir au client sélectionné.")
+    if features is not None:
+        from accounts.models import MODULES
+        known = {code for code, _ in MODULES} | {"ocr", "assistant", "maintenance"}
+        allowed = set(version.features) if version.features else known
+        if not set(features).issubset(known) or not set(features).issubset(allowed):
+            raise LicenseError("VALIDATION_ERROR", "Sélectionnez uniquement des modules disponibles dans l'offre.")
+    batch_id = uuid.uuid4()
+    issued = []
+    for _ in range(quantity):
+        raw = secrets.token_hex(16).upper()
+        code = "-".join(raw[i:i + 4] for i in range(0, len(raw), 4))
+        normalized = re.sub(r"[^A-Z0-9]", "", code.upper())
+        L.OfferVoucher.objects.create(
+            batch_id=batch_id, offer_version=version, features=features,
+            code_hash=hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
+            code_hint=normalized[-4:], target_tenant=target_tenant, created_by=by, expires_at=expires_at,
+            request=request,
+        )
+        issued.append(code)
+    audit.record(by, f"Vouchers {batch_id}", "Lot de vouchers créé", "",
+                 f"{quantity} code(s) · {target_tenant.name} · {version.offer.name} v{version.number}", tenant=None)
+    return batch_id, issued
+
+
+@transaction.atomic
+def redeem_voucher(*, code, by=None):
+    normalized = re.sub(r"[^A-Z0-9]", "", str(code).upper())
+    if len(normalized) != 32:
+        raise LicenseError("VOUCHER_INVALID", "Ce voucher est invalide ou déjà utilisé.", 400)
+    code_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    voucher = L.OfferVoucher.objects.select_for_update().select_related(
+        "target_tenant", "offer_version__offer"
+    ).filter(code_hash=code_hash).first()
+    if voucher is None or voucher.target_tenant_id is None:
+        raise LicenseError("VOUCHER_INVALID", "Ce voucher est invalide ou déjà utilisé.", 400)
+    now = timezone.now()
+    if voucher.redeemed_at or voucher.revoked_at or (voucher.expires_at and voucher.expires_at <= now):
+        raise LicenseError("VOUCHER_INVALID", "Ce voucher est invalide, expiré ou déjà utilisé.", 400)
+    tenant = voucher.target_tenant
+    if by is not None and getattr(by, "tenant_id", None) != tenant.pk:
+        raise LicenseError("VOUCHER_INVALID", "Ce voucher n'est pas destiné à votre entreprise.", 403)
+    if tenant.status != "active":
+        raise LicenseError("TENANT_INACTIVE", "L'entreprise est suspendue ou désactivée. Contactez le Pilote.", 403)
+    sub = activate_offer(by=by, tenant=tenant, version=voucher.offer_version,
+                         reason=f"Activation par voucher {voucher.code_hint}", features=voucher.features)
+    voucher.redeemed_by = by
+    voucher.redeemed_tenant = tenant
+    voucher.redeemed_at = now
+    voucher.save(update_fields=["redeemed_by", "redeemed_tenant", "redeemed_at"])
+    if voucher.request_id:
+        req = L.LicenseRequest.objects.select_for_update().get(pk=voucher.request_id)
+        old_status = req.status
+        req.status, req.fulfilled_at = L.INSTALLED, now
+        req.save(update_fields=["status", "fulfilled_at"])
+        _event(req, by, old_status, L.INSTALLED, f"Offre activée par le voucher {voucher.code_hint}")
+        audit.record(by, f"Demande n° {req.id}", "Offre installée par voucher", old_status, L.INSTALLED, tenant=tenant)
+    audit.record(by, f"Voucher {voucher.code_hint}", "Voucher utilisé", "Disponible",
+                 f"{voucher.offer_version.offer.name} v{voucher.offer_version.number}", tenant=tenant)
+    return sub
+
+
 def _event(req, actor, old, new, comment=""):
     L.LicenseRequestEvent.objects.create(request=req, actor=actor, from_status=old, to_status=new, comment=comment)
 
@@ -393,17 +523,22 @@ def _notify_tenant(tenant, title, body):
 
 
 @transaction.atomic
-def create_request(*, by, kind, quantity=None, target_offer=None, justification="", submit=True):
+def create_request(*, by, kind, quantity=None, target_offer=None, target_version=None, justification="", submit=True):
     if kind not in dict(L.REQUEST_KINDS):
         raise LicenseError("VALIDATION_ERROR", "Type de demande inconnu.")
     if kind in QUANTITY_KINDS and not quantity:
         raise LicenseError("VALIDATION_ERROR", "Indiquez la quantité demandée.")
+    if target_version is not None:
+        if not target_version.is_published or not target_version.offer.is_active:
+            raise LicenseError("VALIDATION_ERROR", "Choisissez une version publiée d'une offre active.")
+        target_offer = target_version.offer
     if kind == "offer" and target_offer is None:
         raise LicenseError("VALIDATION_ERROR", "Indiquez l'offre souhaitée.")
     if not justification.strip():
         raise LicenseError("VALIDATION_ERROR", "Expliquez le besoin : la demande sera étudiée par le Pilote.")
     req = L.LicenseRequest.objects.create(tenant=by.tenant, kind=kind, quantity=quantity if kind in QUANTITY_KINDS else None,
-                                          target_offer=target_offer, justification=justification.strip(), created_by=by)
+                                          target_offer=target_offer, target_version=target_version,
+                                          justification=justification.strip(), created_by=by)
     _event(req, by, "", L.DRAFT, "Demande créée")
     audit.record(by, f"Demande n° {req.id}", "Demande créée", "", req.get_kind_display(), tenant=by.tenant)
     if submit:
@@ -463,6 +598,10 @@ def fulfil(*, by, req, comment=""):
     if req.kind in ("named", "concurrent"):
         allocate(by=by, tenant=req.tenant, kind=req.kind, delta=req.quantity_granted,
                  reason=f"Demande n° {req.id} approuvée", request=req)
+    elif req.kind == "offer" and req.target_version_id:
+        activate_offer(by=by, tenant=req.tenant, version=req.target_version,
+                       reason=f"Demande n° {req.id} approuvée")
+        comment = comment or f"Offre {req.target_version.offer.name} v{req.target_version.number} activée."
     elif not comment.strip():
         # Quota, offre ou option : l'opération se fait sur l'offre ou l'abonnement ; le Pilote décrit ce qui a été fait.
         raise LicenseError("VALIDATION_ERROR", "Décrivez l'opération réalisée (nouvel abonnement, nouvelle version d'offre…).")

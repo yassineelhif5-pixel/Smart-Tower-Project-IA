@@ -51,6 +51,8 @@ describe("écran Pilotage selon les droits", () => {
     role: { code: "cdp", label: "CdP" },
     isAdmin: false,
     isPlatformAdmin: false,
+    isSupport: false,
+    maintenanceEnabled: false,
     tenant: { slug: "a", name: "A", status: "active" },
     mustChangePassword: false,
     permissions,

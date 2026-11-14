@@ -16,7 +16,13 @@ import type {
   TenantSubscriptionDetail,
   UserCapabilities,
   Access,
+  OfferChoice,
+  VoucherBatch,
+  VoucherIssueResult,
   AdminProject,
+  ProjectClientChoice,
+  PlatformTenantRights,
+  SaaSReport,
   AdminUser,
   ApiLog,
   ApiStats,
@@ -29,8 +35,18 @@ import type {
   Me,
   NotificationSettings,
   RolesResponse,
+  SSOSettings,
+  SSOAccessQueue,
+  AccessChangeQueue,
+  TimeEntries,
+  ConnectorCatalogView,
+  TenantDomainRow,
   Secret,
   UserInput,
+  TimeSettings,
+  TimeDelegations,
+  TimeDelegationRow,
+  Role,
 } from "../types/api";
 import { api } from "./client";
 
@@ -40,6 +56,19 @@ export const authApi = {
   logout: () => api.post<void>("/auth/logout"),
   changePassword: (current_password: string, new_password: string) =>
     api.post<Me>("/auth/change-password", { current_password, new_password }),
+  forgotPassword: (identifier: string) => api.post<{ detail: string }>("/auth/password/forgot", { identifier }),
+  resetPassword: (uid: string, token: string, new_password: string) =>
+    api.post<{ detail: string; confirmed?: boolean; username?: string }>("/auth/password/reset", { uid, token, new_password }),
+};
+
+export const timeApi = {
+  entries: () => api.get<TimeEntries>("/timesheets"),
+  create: (body: { project: string; action?: string; workDate: string; amount: number }) => api.post("/timesheets", body),
+  decide: (id: number, decision: "approved" | "rejected") => api.post(`/timesheets/${id}/decision`, { decision }),
+  delegations: () => api.get<TimeDelegations>("/timesheets/delegations"),
+  createDelegation: (body: { delegator?: number; delegate: number; startDate: string; endDate: string; reason?: string }) =>
+    api.post<TimeDelegationRow>("/timesheets/delegations", body),
+  deleteDelegation: (id: number) => api.delete<void>(`/timesheets/delegations/${id}`),
 };
 
 export const adminApi = {
@@ -50,11 +79,37 @@ export const adminApi = {
   access: (id: number) => api.get<Access>(`/admin/users/${id}/access`),
   setAccess: (id: number, access: Access) => api.put<Access>(`/admin/users/${id}/access`, access),
   projects: () => api.get<AdminProject[]>("/admin/projects"),
+  companyProfile: () => api.get<TenantRow>("/admin/company"),
+  updateCompanyProfile: (body: Partial<Pick<TenantRow, "industry" | "website" | "phone" | "address" | "city" | "country" | "contactName" | "contactEmail" | "contactPhone" | "description">>) =>
+    api.patch<TenantRow>("/admin/company", body),
+  saasReport: () => api.get<SaaSReport>("/admin/saas-report"),
+  projectClients: () => api.get<ProjectClientChoice[]>("/admin/project-clients"),
+  createClient: (body: { name: string; sector?: string; city?: string }) =>
+    api.post<ProjectClientChoice>("/admin/project-clients", body),
+  createProject: (body: { code: string; name: string; client: string; method?: string; description?: string; startDate?: string; endDate?: string; pm?: number | null; tl?: number | null; projectType?: string; baseProject?: string | null; baseVersion?: string }) =>
+    api.post<AdminProject>("/admin/projects", body),
+  updateProject: (id: string, body: { name?: string; client?: string; method?: string; description?: string; startDate?: string; endDate?: string; pm?: number | null; tl?: number | null; projectType?: string; baseProject?: string | null; baseVersion?: string }) =>
+    api.patch<AdminProject>(`/admin/projects/${encodeURIComponent(id)}`, body),
   roles: () => api.get<RolesResponse>("/admin/roles"),
+  createRole: (body: { label: string; question?: string; internal: boolean; money: boolean; margin: boolean }) =>
+    api.post<Role>("/admin/roles", body),
   setPermissions: (code: string, permissions: Record<string, Flags>) =>
     api.put<{ code: string; permissions: Record<string, Flags> }>(`/admin/roles/${code}/permissions`, { permissions }),
   database: () => api.get<DatabaseStatus>("/admin/database"),
   testDatabase: () => api.post<DatabaseStatus>("/admin/database/test"),
+  sso: () => api.get<SSOSettings>("/admin/sso"),
+  saveSso: (body: { issuer: string; clientId: string; clientSecret?: string; defaultRole: string; enabled: boolean }) =>
+    api.put<SSOSettings>("/admin/sso", body),
+  ssoRequests: () => api.get<SSOAccessQueue>("/admin/sso/requests"),
+  timeSettings: () => api.get<TimeSettings>("/admin/time-settings"),
+  saveTimeSettings: (body: { unit: "hour" | "day"; hoursPerDay: number; clientVisible: boolean; approval: string; clientApproval?: boolean }) =>
+    api.put<TimeSettings>("/admin/time-settings", body),
+  decideSsoRequest: (id: number, action: "approve" | "reject", role?: string) =>
+    api.post<{ id: number; email: string; status: string }>(`/admin/sso/requests/${id}`, { action, ...(role ? { role } : {}) }),
+  accessChangeRequests: () => api.get<AccessChangeQueue>("/admin/access-requests"),
+  requestAccessChange: (body: { user: number; role: string; reason: string }) => api.post<{ id: number; status: string }>("/admin/access-requests", body),
+  decideAccessChange: (id: number, action: "approve" | "reject", role?: string) =>
+    api.post<{ id: number; status: string }>(`/admin/access-requests/${id}`, { action, ...(role ? { role } : {}) }),
   endpoints: () => api.get<Endpoint[]>("/admin/api/endpoints"),
   stats: (hours: number) => api.get<ApiStats>(`/admin/api/stats?hours=${hours}`),
   logs: (errorsOnly: boolean) => api.get<ApiLog[]>(`/admin/api/logs?limit=100${errorsOnly ? "&errors=1" : ""}`),
@@ -102,21 +157,43 @@ export const licensingApi = {
     kind: string;
     quantity?: number | null;
     targetOffer?: number | null;
+    targetVersion?: number | null;
     justification: string;
   }) => api.post<LicenseRequest>("/licensing/requests", body),
   requestAction: (id: number, action: "submit" | "cancel" | "comment", comment = "") =>
     api.post<LicenseRequest>(`/licensing/requests/${id}/${action}`, { comment }),
-  offers: () => api.get<{ id: number; code: string; name: string; description: string }[]>("/licensing/offers"),
+  offers: () => api.get<OfferChoice[]>("/licensing/offers"),
+  redeemVoucher: (code: string) => api.post<{ tenant: string; offer: string; version: number; status: string; endDate: string | null }>("/licensing/vouchers/redeem", { code }),
 };
 
 /** Espace Pilote (Super Admin Global). */
 export const platformApi = {
+  saasReport: () => api.get<SaaSReport>("/platform/saas-report"),
   dashboard: () => api.get<PilotDashboard>("/platform/dashboard"),
+  tenantRights: (id: number) => api.get<PlatformTenantRights>(`/platform/tenants/${id}/access-rights`),
+  setTenantRights: (id: number, roles: Record<string, { projectCreate: boolean; capabilities: string[] }>) =>
+    api.put<PlatformTenantRights>(`/platform/tenants/${id}/access-rights`, { roles }),
+  domains: () => api.get<TenantDomainRow[]>("/platform/domains"),
+  connectorAssignments: () => api.get<ConnectorCatalogView>("/platform/connectors"),
+  setClientConnector: (tenant: number, client: string, connector: string, enabled: boolean) =>
+    api.post<{ client: string; connector: string; enabled: boolean; projects: number }>("/platform/connectors", { tenant, client, connector, enabled }),
+  setProjectConnector: (project: string, connector: string, enabled: boolean) =>
+    api.post<{ project: string; connector: string; enabled: boolean }>("/platform/connectors", { project, connector, enabled }),
+  maintenance: () => api.get<MaintenanceDashboard>("/platform/maintenance"),
+  setMaintenance: (tenant: number, body: { enabled: boolean; plan?: string; startsAt?: string | null; endsAt?: string | null }) =>
+    api.post(`/platform/maintenance/${tenant}`, body),
+  supportUsers: () => api.get<{ id: number; username: string; email: string; isActive: boolean }[]>("/platform/support/users"),
+  createSupportUser: (body: { username: string; email?: string }) =>
+    api.post<{ id: number; username: string; email: string; isActive: boolean; temporaryPassword: string }>("/platform/support/users", body),
+  assignDomain: (body: { domain: string; tenant: number; enabled: boolean; client?: string | null }) =>
+    api.post<TenantDomainRow>("/platform/domains", body),
+  updateDomain: (id: number, body: { tenant?: number; enabled?: boolean; client?: string | null }) =>
+    api.patch<TenantDomainRow>(`/platform/domains/${id}`, body),
   tenants: (q = "", status = "") =>
     api.get<TenantRow[]>(`/platform/tenants?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}`),
   tenant: (id: number) => api.get<TenantDetail>(`/platform/tenants/${id}`),
   createTenant: (body: Record<string, unknown>) => api.post<CreatedTenant>("/platform/tenants", body),
-  updateTenant: (id: number, body: { name?: string; status?: string; reason?: string }) =>
+  updateTenant: (id: number, body: { name?: string; status?: string; reason?: string; industry?: string; website?: string; phone?: string; address?: string; city?: string; country?: string; contactName?: string; contactEmail?: string; contactPhone?: string; description?: string }) =>
     api.patch<TenantDetail>(`/platform/tenants/${id}`, body),
   subscription: (id: number) => api.get<TenantSubscriptionDetail>(`/platform/tenants/${id}/subscription`),
   subscribe: (id: number, body: Record<string, unknown>) =>
@@ -126,6 +203,10 @@ export const platformApi = {
   allocate: (id: number, body: { kind: string; delta: number; reason: string }) =>
     api.post<LicensingOverview>(`/platform/tenants/${id}/allocations`, body),
   offers: () => api.get<Offer[]>("/platform/offers"),
+  voucherBatches: () => api.get<VoucherBatch[]>("/platform/vouchers"),
+  createVouchers: (body: { version: number; targetTenant: number; quantity: number; expiresAt: string | null; features?: string[]; clientEmail?: string }) =>
+    api.post<VoucherIssueResult>("/platform/vouchers", body),
+  revokeVoucherBatch: (batchId: string) => api.post<{ revoked: number }>(`/platform/vouchers/${batchId}/revoke`),
   createOffer: (body: { code: string; name: string; description?: string }) =>
     api.post<Offer>("/platform/offers", body),
   updateOffer: (id: number, body: { name?: string; description?: string; isActive?: boolean }) =>
@@ -142,4 +223,30 @@ export const platformApi = {
     body: { status?: string; quantityGranted?: number | null; comment?: string },
   ) => api.post<LicenseRequest>(`/platform/requests/${id}/${action}`, body),
   audit: (tenant?: number) => api.get<PlatformAuditRow[]>(`/platform/audit${tenant ? `?tenant=${tenant}` : ""}`),
+};
+
+export interface MaintenanceTicket {
+  id: number; tenant: number; tenantName: string; requester: string; email: string; title: string; description: string;
+  category: string; status: "new" | "triaged" | "in_progress" | "resolved" | "closed";
+  assignedTo: string | null; createdAt: string; updatedAt: string;
+  aiStatus: "pending" | "ready" | "unavailable" | "error"; aiAnalysis: string; aiReply: string;
+}
+
+export interface MaintenanceDashboard {
+  entitlements: { tenant: number; tenantName: string; enabled: boolean; plan: string; startsAt: string | null;
+    endsAt: string | null; assignedBy: string | null; updatedAt: string; requestCount: number }[];
+  requests: MaintenanceTicket[];
+  statistics: { total: number; byStatus: Record<string, number> };
+}
+
+export const supportApi = {
+  tenants: () => api.get<{ id: number; name: string; status: string }[]>("/platform/support/tenants"),
+  clientRequests: () => api.get<{ enabled: boolean; plan: string; endsAt: string | null; requests: MaintenanceTicket[] }>("/maintenance/requests"),
+  createRequest: (body: { title: string; description: string; category: string }) => api.post<MaintenanceTicket>("/maintenance/requests", body),
+  queue: () => api.get<{ requests: MaintenanceTicket[]; staff: { id: number; username: string }[] }>("/platform/support/requests"),
+  update: (id: number, body: { status?: string; assignedTo?: number | null }) => api.patch<MaintenanceTicket>(`/platform/support/requests/${id}`, body),
+};
+
+export const assistantApi = {
+  ask: (question: string) => api.post<{ answer: string }>("/assistant/chat", { question }),
 };

@@ -5,7 +5,8 @@ import { methodologyApi } from "../../api/methodology";
 import { useApi } from "../../api/useApi";
 import { Card, ErrorNotice, Field, Loading, useAction } from "../../components/ui";
 import { fmt, GOAL_STATUS, PRIORITY, Status } from "../../features/methodology/shared";
-import type { WeeklyGoal } from "../../types/methodology";
+import type { Phase, WeeklyGoal } from "../../types/methodology";
+import { WeekActions } from "../../features/planning/WeekActions";
 import type { PageProps } from "./types";
 import { mondayIso, shiftWeek } from "./WeeklyPlanningPage";
 
@@ -28,6 +29,9 @@ export function WeeklyGoalPage({ info }: PageProps) {
       </div>
       {w.error && <ErrorNotice error={w.error} onRetry={w.reload} />}
       {!w.data && !w.error && <Loading />}
+      {w.data && info.can.plan && w.data.plan.state !== "closed" && (
+        <NewGoalForm projectId={id} week={week} phases={phases.data?.phases ?? []} onDone={w.reload} />
+      )}
       {w.data && (
         <div className="goal-grid">
           {w.data.plan.goals.map((g) => (
@@ -42,10 +46,15 @@ export function WeeklyGoalPage({ info }: PageProps) {
             />
           ))}
           {!w.data.plan.goals.length && (
-            <div className="empty">Aucun objectif pour cette semaine : préparez-la dans l'onglet « Semaine ».</div>
+            <div className="empty">
+              {info.can.plan && w.data.plan.state !== "closed"
+                ? "Aucun objectif pour cette semaine : ajoutez-en un ci-dessus."
+                : "Aucun objectif pour cette semaine."}
+            </div>
           )}
         </div>
       )}
+      <WeekActions projectId={id} week={week} />
       {w.data && w.data.history.length > 0 && (
         <Card title="Semaines précédentes">
           <table className="tbl tight">
@@ -291,5 +300,105 @@ function GoalCard({
         )}
       </div>
     </section>
+  );
+}
+
+
+/** Ajout direct d'un objectif de la semaine (chef de projet), sans passer par la préparation guidée. */
+function NewGoalForm({ projectId, week, phases, onDone }: { projectId: string; week: string; phases: Phase[]; onDone: () => void }) {
+  const empty = { title: "", expectedResults: "", successCriteria: "", deliverables: "", priority: "normal", owner: "", phases: [] as number[] };
+  const [open, setOpen] = useState(false);
+  const [goal, setGoal] = useState(empty);
+  const people = useApi(() => calendarApi.people(projectId), [projectId]);
+  const { run, busy } = useAction();
+  if (!open)
+    return (
+      <div>
+        <button className="btn primary" type="button" onClick={() => setOpen(true)}>
+          + Ajouter un objectif de la semaine
+        </button>
+      </div>
+    );
+  const togglePhase = (pid: number) =>
+    setGoal((g) => ({ ...g, phases: g.phases.includes(pid) ? g.phases.filter((x) => x !== pid) : [...g.phases, pid] }));
+  const save = () =>
+    void run(
+      () =>
+        methodologyApi.weekAction(projectId, week, "goals", {
+          ...goal,
+          owner: goal.owner ? Number(goal.owner) : null,
+        }),
+      "Objectif ajouté",
+    ).then(
+      () => {
+        setGoal(empty);
+        setOpen(false);
+        onDone();
+      },
+      () => undefined,
+    );
+  return (
+    <Card title="Nouvel objectif de la semaine" sub={`Semaine du ${fmt(week)}`}>
+      <div className="ev-form">
+        <Field id="ng-title" label="Objectif *">
+          <input id="ng-title" className="inp" maxLength={300} autoFocus placeholder="Ex. Terminer la conception détaillée du module Paiement"
+            value={goal.title} onChange={(e) => setGoal({ ...goal, title: e.target.value })} />
+        </Field>
+        <div className="grid g2">
+          <Field id="ng-res" label="Résultats attendus">
+            <textarea id="ng-res" className="inp" rows={2} value={goal.expectedResults} onChange={(e) => setGoal({ ...goal, expectedResults: e.target.value })} />
+          </Field>
+          <Field id="ng-crit" label="Critères de réussite">
+            <textarea id="ng-crit" className="inp" rows={2} value={goal.successCriteria} onChange={(e) => setGoal({ ...goal, successCriteria: e.target.value })} />
+          </Field>
+        </div>
+        <div className="grid g3">
+          <Field id="ng-deliv" label="Livrables">
+            <input id="ng-deliv" className="inp" value={goal.deliverables} onChange={(e) => setGoal({ ...goal, deliverables: e.target.value })} />
+          </Field>
+          <Field id="ng-owner" label="Responsable">
+            <select id="ng-owner" className="inp" value={goal.owner} onChange={(e) => setGoal({ ...goal, owner: e.target.value })}>
+              <option value="">Non désigné</option>
+              {(people.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field id="ng-prio" label="Priorité">
+            <select id="ng-prio" className="inp" value={goal.priority} onChange={(e) => setGoal({ ...goal, priority: e.target.value })}>
+              {Object.entries(PRIORITY).map(([k, l]) => (
+                <option key={k} value={k}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        {phases.length > 0 && (
+          <div className="ng-phases">
+            <span className="muted">Phases concernées :</span>
+            {phases.map((ph) => (
+              <label key={ph.id} className={`chip-toggle${goal.phases.includes(ph.id) ? " on" : ""}`}>
+                <input type="checkbox" checked={goal.phases.includes(ph.id)} onChange={() => togglePhase(ph.id)} />
+                {ph.name}
+              </label>
+            ))}
+          </div>
+        )}
+        <div className="btns" style={{ justifyContent: "flex-end" }}>
+          <button className="btn ghost" type="button" onClick={() => { setOpen(false); setGoal(empty); }}>
+            Annuler
+          </button>
+          <button className="btn primary" type="button" disabled={busy || !goal.title.trim()} onClick={save}>
+            Ajouter l’objectif
+          </button>
+        </div>
+        <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+          Vous pourrez rattacher des actions à cet objectif depuis l’onglet « Semaine » (préparation guidée).
+        </p>
+      </div>
+    </Card>
   );
 }

@@ -23,6 +23,7 @@ export const REQUEST_LABEL: Record<RequestStatus, string> = {
   REJECTED: "Refusée",
   CANCELLED: "Annulée",
   FULFILLED: "Réalisée",
+  INSTALLED: "Installée",
 };
 
 export const REQUEST_TONE: Record<RequestStatus, Tone> = {
@@ -35,6 +36,7 @@ export const REQUEST_TONE: Record<RequestStatus, Tone> = {
   REJECTED: "crit",
   CANCELLED: "",
   FULFILLED: "ok",
+  INSTALLED: "ok",
 };
 
 export const REQUEST_KINDS: [string, string][] = [

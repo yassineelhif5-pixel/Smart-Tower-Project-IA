@@ -15,9 +15,18 @@ const STATUS_TONE: Record<TeamsConnectorSettings["status"], ["ok" | "warn" | "cr
 
 /** Onglet « Connecteurs » de la Configuration : application Microsoft de l'entreprise et couleurs du calendrier. */
 export function TeamsIntegrationSettings() {
+  const assigned = useApi(teamsApi.assignedConnectors);
+  if (assigned.error) return <ErrorNotice error={assigned.error} onRetry={assigned.reload} />;
+  if (!assigned.data) return <Loading />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <TeamsConnectorCard />
+      <Card title="Connecteurs attribués par le Pilote" sub="Seuls les connecteurs affectés à au moins un projet de votre entreprise sont disponibles.">
+        {assigned.data.length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{assigned.data.map((connector) => <Pill key={connector.code} tone="acc">{connector.label}</Pill>)}</div>
+          : <div className="notice">Aucun connecteur n’a encore été affecté à vos projets. Le Pilote gère cette attribution.</div>}
+      </Card>
+      {assigned.data.some((connector) => connector.code === "teams") ? <TeamsConnectorCard /> : <Card title="Microsoft Teams">
+        <div className="notice">Le connecteur Microsoft Teams n’est pas attribué par le Pilote à un projet de votre entreprise.</div>
+      </Card>}
       <CalendarColorsCard />
     </div>
   );

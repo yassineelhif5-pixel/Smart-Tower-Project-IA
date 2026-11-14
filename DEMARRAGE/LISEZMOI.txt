@@ -1,0 +1,27 @@
+PROJECT CONTROL TOWER - DEMARRAGE
+==================================
+
+Premiere fois (ou apres une mise a jour des dependances) :
+  1-INSTALLER.bat          Cree l environnement Python, installe les dependances, migre la base, npm install.
+
+Chaque jour :
+  2-DEMARRER.bat           Demarre le backend (port 8000) et le frontend (port 5173) puis ouvre http://localhost:5173
+                           (met aussi a jour les dependances et la base automatiquement).
+
+Au besoin :
+  3-REDEMARRER-BACKEND.bat Apres une modification du code Python ou du fichier backend\.env.
+  4-ARRETER.bat            Arrete le backend et le frontend.
+  5-MIGRER-LA-BASE.bat     Applique seulement les migrations de la base.
+
+Equivalent en ligne de commande (PowerShell), depuis la racine du projet :
+  cd backend
+  .\.venv313\Scripts\python.exe -m pip install -r requirements.txt
+  .\.venv313\Scripts\python.exe manage.py migrate
+  .\.venv313\Scripts\python.exe manage.py runserver 127.0.0.1:8000
+  (dans un 2e terminal)
+  cd frontend
+  npm install
+  npm run dev
+
+Prerequis : Python 3.12+, Node.js 20+, fichier backend\.env rempli (voir backend\.env.example).
+Journaux : backend\migrate_log.txt et backend\pip_log.txt (crees par 3-REDEMARRER-BACKEND.bat).

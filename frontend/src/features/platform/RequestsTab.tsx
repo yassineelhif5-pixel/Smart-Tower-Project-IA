@@ -15,6 +15,7 @@ const FILTERS: [string, string][] = [
   ["APPROVED", "Approuvées (à exécuter)"],
   ["PARTIALLY_APPROVED", "Approuvées partiellement (à exécuter)"],
   ["FULFILLED", "Réalisées"],
+  ["INSTALLED", "Installées"],
   ["REJECTED", "Refusées"],
 ];
 
@@ -109,7 +110,9 @@ function Decide({ id, onClose, onChanged }: { id: number; onClose: () => void; o
               sub={
                 ["named", "concurrent"].includes(r.kind)
                   ? `Ajoute ${r.quantityGranted} licence(s) au stock de l'entreprise.`
-                  : "Décrivez l'opération réalisée (nouvel abonnement, nouvelle version d'offre…)."
+                  : r.kind === "offer" && r.targetVersion
+                    ? `Applique l'offre ${r.targetVersion.offer} v${r.targetVersion.number} et crée le nouvel abonnement.`
+                    : "Décrivez l'opération réalisée (nouvel abonnement, nouvelle version d'offre…)."
               }
             >
               <Field id="f-c" label="Commentaire">

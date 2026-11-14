@@ -12,6 +12,9 @@ import { DailyScrumPage, ScrumDashboardPage, SprintGoalPage, SprintReviewPage } 
 import { SprintBoardPage } from "./methodology/SprintBoardPage";
 import { SprintPlanningPage } from "./methodology/SprintPlanningPage";
 import { TeamCapacityPage } from "./methodology/TeamCapacityPage";
+import { AssistantButton } from "../features/assistant/ProjectAssistant";
+import { AlertButton } from "../features/projects/ProjectAlerts";
+import { MacroPlanningPage } from "./methodology/MacroPlanningPage";
 import { WeeklyGoalPage } from "./methodology/WeeklyGoalPage";
 import { WeeklyPlanningPage } from "./methodology/WeeklyPlanningPage";
 
@@ -29,9 +32,11 @@ type Tab =
   | "retro"
   | "improvements"
   | "reports"
+  | "macro"
   | "settings";
 
 const TABS: [Tab, string, Feature | null][] = [
+  ["macro", "Planning macro", "phases"],
   ["week", "Semaine", "weekly"],
   ["goals", "Weekly Goals", "weekly"],
   ["scrum", "Tableau de bord Scrum", "scrum"],
@@ -59,11 +64,14 @@ export function MethodologyPage({ me }: { me: Me }) {
   const initial = fromHash();
   const [project, setProject] = useState(initial.project);
   const [tab, setTab] = useState<Tab>(initial.tab);
-  const info = useApi(() => (project ? methodologyApi.get(project) : Promise.resolve(null)), [project]);
+  // Un identifiant venu de l'adresse n'est utilisé que s'il fait partie des projets du périmètre.
+  const known = !!project && !!projects.data?.some((p) => p.id === project);
+  const info = useApi(() => (known ? methodologyApi.get(project) : Promise.resolve(null)), [project, known]);
 
   useEffect(() => {
-    if (!project && projects.data?.length) setProject(projects.data[0].id);
-  }, [projects.data, project]);
+    if (!projects.data) return;
+    if (!known) setProject(projects.data[0]?.id ?? "");
+  }, [projects.data, known]);
   const tabs = TABS.filter(([, , f]) => !f || info.data?.features.includes(f));
   const active = tabs.some(([k]) => k === tab) ? tab : tabs[0]?.[0];
   useEffect(() => {
@@ -78,6 +86,7 @@ export function MethodologyPage({ me }: { me: Me }) {
         title="Pilotage"
         sub="Cycle en V et Scrum, avec la capacité réelle de l'équipe. Rien n'est validé, affecté ou sélectionné sans vous."
         right={
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <select
             className="inp"
             aria-label="Projet"
@@ -91,6 +100,9 @@ export function MethodologyPage({ me }: { me: Me }) {
               </option>
             ))}
           </select>
+            {known && <AssistantButton projectId={project} projectName={projects.data?.find((p) => p.id === project)?.name ?? project} />}
+            {known && <AlertButton projectId={project} />}
+          </div>
         }
       />
       {projects.error && <ErrorNotice error={projects.error} onRetry={projects.reload} />}
@@ -109,6 +121,7 @@ export function MethodologyPage({ me }: { me: Me }) {
           </div>
           <Tabs<Tab> tabs={tabs.map(([k, l]) => [k, l])} value={active} onChange={setTab} />
           <div key={`${project}-${active}`}>
+            {active === "macro" && <MacroPlanningPage {...props} />}
             {active === "week" && <WeeklyPlanningPage {...props} />}
             {active === "goals" && <WeeklyGoalPage {...props} />}
             {active === "scrum" && <ScrumDashboardPage {...props} />}

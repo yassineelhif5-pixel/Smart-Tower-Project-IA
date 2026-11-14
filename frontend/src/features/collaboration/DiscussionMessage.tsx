@@ -31,7 +31,7 @@ export function DiscussionMessage({
   const [history, setHistory] = useState<{ at: string; body: string; deleted?: boolean }[] | null>(null);
   const { run, busy } = useAction();
   const m = message;
-  const who = m.author?.name ?? m.externalAuthor ?? "Utilisateur Teams";
+  const who = m.ai ? `${m.ai.name} · IA` : (m.author?.name ?? m.externalAuthor ?? "Utilisateur Teams");
 
   if (m.kind === "system")
     return (
@@ -41,9 +41,10 @@ export function DiscussionMessage({
     );
 
   return (
-    <article className={`msg ${m.mine ? "mine" : ""} ${m.deleted ? "deleted" : ""}`} aria-label={`Message de ${who}`}>
+    <article className={`msg ${m.mine ? "mine" : ""} ${m.deleted ? "deleted" : ""} ${m.ai ? "msg-ai" : ""}`} aria-label={`Message de ${who}`}
+      style={m.ai ? { ["--mate" as string]: m.ai.color } : undefined}>
       <span className="av sm" aria-hidden="true">
-        {initials(who)}
+        {m.ai ? m.ai.avatar : initials(who)}
       </span>
       <div className="msg-b">
         <header>

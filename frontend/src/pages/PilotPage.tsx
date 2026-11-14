@@ -8,13 +8,29 @@ import { DashboardTab } from "../features/platform/DashboardTab";
 import { OffersTab } from "../features/platform/OffersTab";
 import { RequestsTab } from "../features/platform/RequestsTab";
 import { TenantsTab } from "../features/platform/TenantsTab";
+import { VouchersTab } from "../features/platform/VouchersTab";
+import { DomainsTab } from "../features/platform/DomainsTab";
+import { ConnectorAssignmentsTab } from "../features/platform/ConnectorAssignmentsTab";
+import { PilotUsersTab } from "../features/platform/PilotUsersTab";
+import { ContractsTab } from "../features/platform/ContractsTab";
+import { MaintenanceTab } from "../features/platform/MaintenanceTab";
+import { SaaSReportPanel } from "../features/configuration/SaaSReportPanel";
+import { AssistantPilotTab } from "../features/assistant/AssistantSettings";
 
-type Tab = "dashboard" | "tenants" | "offers" | "requests" | "audit" | "database";
+type Tab = "dashboard" | "tenants" | "contracts" | "users" | "offers" | "requests" | "vouchers" | "domains" | "connectors" | "maintenance" | "audit" | "database" | "saas" | "assistants";
 const TABS: [Tab, string][] = [
   ["dashboard", "Tableau de bord"],
+  ["saas", "État SaaS"],
   ["tenants", "Entreprises"],
+  ["contracts", "Contrats & échéances"],
+  ["users", "Utilisateurs"],
   ["offers", "Offres"],
   ["requests", "Demandes"],
+  ["vouchers", "Vouchers"],
+  ["domains", "Domaines SSO"],
+  ["connectors", "Connecteurs (client / projet)"],
+  ["assistants", "Assistants IA"],
+  ["maintenance", "Maintenance & support"],
   ["audit", "Journal de la plateforme"],
   ["database", "Base de données"],
 ];
@@ -83,9 +99,17 @@ export function PilotPage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <Tabs<Tab> tabs={TABS} value={tab} onChange={setTab} />
         {tab === "dashboard" && <DashboardTab onOpenRequests={() => setTab("requests")} />}
+        {tab === "saas" && <SaaSReportPanel scope="platform" />}
         {tab === "tenants" && <TenantsTab />}
+        {tab === "contracts" && <ContractsTab />}
+        {tab === "users" && <PilotUsersTab />}
         {tab === "offers" && <OffersTab />}
         {tab === "requests" && <RequestsTab />}
+        {tab === "vouchers" && <VouchersTab />}
+        {tab === "domains" && <DomainsTab />}
+        {tab === "connectors" && <ConnectorAssignmentsTab />}
+        {tab === "assistants" && <AssistantPilotTab />}
+        {tab === "maintenance" && <MaintenanceTab />}
         {tab === "audit" && <PlatformAudit />}
         {tab === "database" && <DatabaseTab />}
       </div>
