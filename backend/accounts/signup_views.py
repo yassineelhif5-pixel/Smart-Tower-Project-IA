@@ -160,8 +160,10 @@ class OnboardingProfileView(OnboardingBase):
 
 class OnboardingDemoView(OnboardingBase):
     def post(self, request):
-        signup.start_demo(request.user)
-        request.user.refresh_from_db()
+        try:
+            signup.start_demo(request.user)
+        finally:
+            request.user.refresh_from_db()  # annulation : l'utilisateur en mémoire ne garde pas le tenant supprimé
         try:
             open_license_session(request, request.user)
         except license_services.LicenseError as exc:

@@ -27,7 +27,7 @@ from .models import ADMIN_ROLE, PLATFORM_ROLE, Role, SignupProfile, TenantJoinRe
 
 User = get_user_model()
 
-DEMO_OFFER = "demo"
+DEMO_OFFER = "demo-inscription"  # offre dédiée aux démos des comptes inscrits
 DEMO_DAYS = 3
 DEMO_MAX_PROJECTS = 2
 DEMO_SEATS = 5
@@ -200,12 +200,16 @@ def demo_version():
     """Offre « Démo » (créée au premier usage, modifiable ensuite par le Pilote)."""
     from licensing.models import Offer, OfferVersion
     offer, _ = Offer.objects.get_or_create(code=DEMO_OFFER, defaults={
-        "name": "Démo 3 jours", "position": 0,
-        "description": "Essai gratuit : tous les modules, 2 projets, 3 jours."})
+        "name": "Démo 3 jours (inscription)", "position": 0,
+        "description": "Essai gratuit des comptes inscrits : tous les modules, 2 projets, 3 jours."})
+    if not offer.is_active:
+        raise ApiError("DEMO_UNAVAILABLE", "Les démos sont momentanément indisponibles. Rejoignez une entreprise avec son code "
+                                           "ou réessayez plus tard.", status.HTTP_409_CONFLICT)
     version = OfferVersion.objects.filter(offer=offer, is_published=True).order_by("-number").first()
     if version is None:
+        number = (OfferVersion.objects.filter(offer=offer).order_by("-number").values_list("number", flat=True).first() or 0) + 1
         version = OfferVersion.objects.create(
-            offer=offer, number=1, is_published=True, price=0, billing_period="once", duration_days=DEMO_DAYS,
+            offer=offer, number=number, is_published=True, price=0, billing_period="once", duration_days=DEMO_DAYS,
             trial_days=DEMO_DAYS, license_model="named", max_users=DEMO_SEATS, named_licenses=DEMO_SEATS,
             concurrent_licenses=0, features=[], limits={"max_projects": DEMO_MAX_PROJECTS},
             conditions="Démo gratuite, sans engagement.")
@@ -245,10 +249,13 @@ def start_demo(user):
     user.tenant, user.role_id = tenant, ADMIN_ROLE
     user.save(update_fields=["tenant", "role"])
     TenantMembership.objects.get_or_create(user=user, tenant=tenant, defaults={"role_id": ADMIN_ROLE})
-    lic.create_subscription(by=user, tenant=tenant, version=version, end_date=today() + timedelta(days=DEMO_DAYS))
-    seat = L.License.objects.filter(tenant=tenant, kind=L.NAMED, status=L.AVAILABLE).order_by("number").first()
-    if seat is not None:
-        lic.assign(by=user, license=seat, user=user)
+    try:
+        lic.create_subscription(by=user, tenant=tenant, version=version, end_date=today() + timedelta(days=DEMO_DAYS))
+        seat = L.License.objects.filter(tenant=tenant, kind=L.NAMED, status=L.AVAILABLE).order_by("number").first()
+        if seat is not None:
+            lic.assign(by=user, license=seat, user=user)
+    except lic.LicenseError as exc:
+        raise ApiError(exc.code, exc.message, exc.http_status) from exc
     profile.demo_tenant = tenant
     profile.save(update_fields=["demo_tenant"])
     audit.record(user, f"Entreprise {tenant.name}", "Démo créée", "", f"jusqu'au {tenant.demo_until}", tenant=None)
