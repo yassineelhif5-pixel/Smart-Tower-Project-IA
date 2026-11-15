@@ -10,6 +10,7 @@ import { Field } from "../components/ui";
 import { PrefsSwitcher } from "../i18n";
 import type { Me, Onboarding } from "../types/api";
 import { Brand } from "./LoginPage";
+import { PaymentPanel, PaymentReturn } from "../features/licensing/PaymentPanel";
 
 const STATUS: Record<string, [string, string]> = {
   pending: ["En attente de validation", "info"],
@@ -96,6 +97,14 @@ export function OnboardingPage({ me, onDone, onLogout }: { me: Me; onDone: (me: 
     return (
       <Frame me={state.me} onLogout={onLogout} title="Votre démo est terminée"
         sub={`La démo « ${ob.demo?.tenant ?? ""} » a pris fin le ${ob.demo ? new Date(ob.demo.until).toLocaleDateString("fr-FR") : ""}. Vos données sont conservées.`}>
+        <PaymentReturn onDone={refresh} />
+        {ob.isDemoAdmin && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <h3 style={{ margin: 0 }}>💳 Payer et activer maintenant</h3>
+            <PaymentPanel onPaid={refresh} />
+          </div>
+        )}
+        <div className="onb-sep"><span>ou sans paiement en ligne</span></div>
         <ActivatePanel ob={ob} busy={busy} apply={apply} />
         <div className="onb-sep"><span>ou</span></div>
         <JoinPanel busy={busy} apply={apply} title="Rejoindre une autre entreprise" />
@@ -246,7 +255,7 @@ function ActivatePanel({ ob, busy, apply }: { ob: Onboarding; busy: boolean; app
     return <div className="callout info">L’administrateur de la démo peut activer une licence. Vous pouvez aussi rejoindre une autre entreprise ci-dessous.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <h3 style={{ margin: 0 }}>🔑 Activer une licence pour « {ob.demo?.tenant} »</h3>
+      <h3 style={{ margin: 0 }}>🔑 Demander une offre au Pilote ou utiliser un voucher</h3>
       {open ? (
         <div className="callout info"><b>Demande n° {lr.id} — {lr.statusLabel}</b><div>Offre demandée : {lr.offer}. Le Pilote vous répondra par e-mail ; l’accès reprend dès l’activation.</div></div>
       ) : (

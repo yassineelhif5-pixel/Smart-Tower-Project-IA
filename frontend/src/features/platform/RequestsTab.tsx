@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PaymentPanel } from "../licensing/PaymentPanel";
 
 import { platformApi } from "../../api/endpoints";
 import { useApi } from "../../api/useApi";
@@ -131,6 +132,11 @@ function Decide({ id, onClose, onChanged }: { id: number; onClose: () => void; o
               >
                 Exécuter l'attribution
               </button>
+            </Card>
+          )}
+          {executable && (
+            <Card title="💳 Paiement en ligne (Stripe)" sub="Créez le lien de paiement : l’offre ou les licences demandées sont attribuées automatiquement dès que le client a payé.">
+              <PaymentPanel requestId={r.id} pilot onPaid={onChanged} />
             </Card>
           )}
           {!decidable && !executable && (

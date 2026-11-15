@@ -307,3 +307,34 @@ class LicenseRequestEvent(models.Model):
 
     class Meta:
         ordering = ["at", "id"]
+
+
+class Payment(models.Model):
+    """Paiement Stripe (Checkout) d'une offre ou d'un lot de licences ; appliqué automatiquement une fois payé."""
+
+    PENDING, PAID, APPLIED, FAILED, EXPIRED, CANCELLED = "pending", "paid", "applied", "failed", "expired", "cancelled"
+    STATUSES = [(PENDING, "En attente"), (PAID, "Payé"), (APPLIED, "Payé et appliqué"), (FAILED, "Échec"),
+                (EXPIRED, "Expiré"), (CANCELLED, "Abonnement résilié")]
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT, related_name="payments")
+    created_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, related_name="+")
+    kind = models.CharField(max_length=10, choices=[("offer", "Offre"), ("licenses", "Licences")])
+    offer_version = models.ForeignKey(OfferVersion, on_delete=models.PROTECT, null=True, blank=True, related_name="payments")
+    license_kind = models.CharField(max_length=10, choices=LICENSE_KINDS, blank=True)
+    quantity = models.PositiveIntegerField(default=1)
+    unit_amount = models.PositiveIntegerField(help_text="Montant unitaire en centimes")
+    amount = models.PositiveIntegerField(help_text="Montant total en centimes")
+    currency = models.CharField(max_length=3, default="EUR")
+    interval = models.CharField(max_length=10, blank=True, help_text="month, year ou vide (paiement unique)")
+    request = models.ForeignKey(LicenseRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
+    stripe_session = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    stripe_customer = models.CharField(max_length=255, blank=True)
+    stripe_subscription = models.CharField(max_length=255, blank=True)
+    checkout_url = models.URLField(max_length=1000, blank=True)
+    error = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

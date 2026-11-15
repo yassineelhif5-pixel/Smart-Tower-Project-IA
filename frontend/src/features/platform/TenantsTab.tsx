@@ -11,6 +11,7 @@ import { TenantProfileEditor } from "./TenantProfileEditor";
 import { TenantClientDomains } from "./TenantClientDomains";
 import { PilotTenantNotifications } from "../notifications/PilotTenantNotifications";
 import { TenantJoinCode } from "./TenantJoinCode";
+import { PaymentPanel } from "../licensing/PaymentPanel";
 import { ExcelImportAccessCard } from "../import/ExcelImportAccess";
 
 const STATUSES: [string, string][] = [
@@ -286,6 +287,7 @@ function TenantDetail({
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Tabs<"info" | "domains" | "notif"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"], ["notif", "Notifications e-mail"]]} value={pane} onChange={setPane} />
           <TenantJoinCode tenantId={id} />
+          <details className="pay-details"><summary><b>💳 Créer un lien de paiement (offre ou licences)</b></summary><PaymentPanel tenantId={id} pilot /></details>
           <div className="kpis">
             <div className="kpi">
               <label>Statut</label>

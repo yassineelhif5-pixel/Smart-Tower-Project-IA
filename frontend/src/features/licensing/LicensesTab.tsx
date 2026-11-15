@@ -6,6 +6,7 @@ import { Card, ErrorNotice, Field, fmtDate, Loading, Modal, Pill, useAction } fr
 import type { LicenseRow } from "../../types/api";
 import { fmtDay, REQUEST_KINDS, REQUEST_LABEL, REQUEST_TONE, SUB_TONE } from "./labels";
 import { RequestView } from "./RequestView";
+import { PaymentPanel } from "./PaymentPanel";
 
 const can = (caps: string[], code: string) => caps.includes(code);
 
@@ -521,6 +522,11 @@ function Requests({ caps }: { caps: string[] }) {
 export function LicensesTab({ capabilities }: { capabilities: string[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {can(capabilities, "requests.create") && (
+        <Card title="💳 Abonnement et paiement en ligne" sub="Choisissez une offre ou achetez le nombre de licences souhaité, puis payez en ligne : l’activation est automatique.">
+          <PaymentPanel />
+        </Card>
+      )}
       <VoucherRedemption caps={capabilities} />
       {can(capabilities, "licenses.view") && (
         <>

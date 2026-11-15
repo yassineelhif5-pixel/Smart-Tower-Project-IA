@@ -14,6 +14,7 @@ from configuration import views as conf
 from configuration import client_domains, pilot_users
 from licensing import views as lic
 from licensing import contract_report
+from licensing import payment_views as pay
 from projects import views as projects
 from tenants import views as tenants
 
@@ -84,6 +85,7 @@ platform_patterns = [
     path("config", notif_admin.PlatformConfigView.as_view()),
     path("config/smtp", notif_admin.PlatformSmtpView.as_view()),
     path("config/google", signup_api.PlatformGoogleView.as_view()),
+    path("config/stripe", pay.PlatformStripeView.as_view()),
     path("join-requests", signup_api.PlatformJoinRequestsView.as_view()),
     path("join-requests/<int:pk>", signup_api.PlatformJoinRequestsView.as_view()),
     path("tenants/<int:pk>/join-code", signup_api.PlatformTenantJoinCodeView.as_view()),
@@ -133,6 +135,11 @@ api_patterns = [
     path("auth/sso/start", auth.SSOStartView.as_view()),
     path("auth/sso/callback", auth.SSOCallbackView.as_view()),
     path("auth/providers", signup_api.ProvidersView.as_view()),
+    path("payments", pay.PaymentListView.as_view()),
+    path("payments/options", pay.PaymentOptionsView.as_view()),
+    path("payments/checkout", pay.PaymentCheckoutView.as_view()),
+    path("payments/confirm", pay.PaymentConfirmView.as_view()),
+    path("payments/stripe/webhook", pay.StripeWebhookView.as_view()),
     path("auth/signup", signup_api.SignupView.as_view()),
     path("auth/signup/verify", signup_api.SignupVerifyView.as_view()),
     path("auth/signup/resend", signup_api.SignupResendView.as_view()),

@@ -3027,3 +3027,15 @@ button.bell-item { width: 100%; text-align: left; border: 0; background: transpa
 .onb-offer.on { border-color: #6366f1; }
 .demo-banner { margin: 0 0 12px; padding: 8px 14px; border-radius: 10px; font-size: 13px; background: linear-gradient(90deg, rgba(99, 102, 241, .12), rgba(168, 85, 247, .12)); border: 1px solid rgba(99, 102, 241, .3); }
 .join-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; letter-spacing: 2px; padding: 4px 10px; border-radius: 8px; background: var(--bg-soft, #f1f5f9); }
+
+/* ---------- Paiement en ligne (Stripe) ---------- */
+.pay-panel { display: flex; flex-direction: column; gap: 12px; }
+.pay-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.pay-mode { text-align: left; border: 1px solid var(--line, #e2e8f0); border-radius: 12px; padding: 10px 14px; background: var(--card, #fff); display: flex; flex-direction: column; gap: 2px; cursor: pointer; color: inherit; font: inherit; }
+.pay-mode.on { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+.pay-mode:disabled { opacity: .55; cursor: not-allowed; }
+.onb-offer.disabled { opacity: .55; cursor: not-allowed; }
+.pay-total { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-radius: 10px; background: var(--bg-soft, #f1f5f9); }
+.pay-details { border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 10px 12px; }
+.pay-details summary { cursor: pointer; }
+.pay-details[open] summary { margin-bottom: 10px; }

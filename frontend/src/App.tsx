@@ -12,6 +12,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MyAccessPage } from "./pages/MyAccessPage";
 import { DemoBanner, OnboardingPage } from "./pages/OnboardingPage";
 import { JoinRequestsPanel } from "./features/configuration/JoinRequestsPanel";
+import { PaymentReturn } from "./features/licensing/PaymentPanel";
 import { SSORequestsPanel } from "./features/configuration/SSORequestsPanel";
 import { AccessChangeRequestsPanel } from "./features/configuration/AccessChangeRequestsPanel";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -120,6 +121,7 @@ export function App() {
   const route = routeFromHash(allowed);
   return (
     <Shell me={me} onLogout={logout} routes={allowed} route={route}>
+      <PaymentReturn onDone={refresh} />
       <DemoBanner me={me} />
       {route === "pilote" && <PilotPage />}
       <Suspense fallback={<Loading />}>
