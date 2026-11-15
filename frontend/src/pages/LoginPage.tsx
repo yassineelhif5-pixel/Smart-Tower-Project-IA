@@ -263,7 +263,7 @@ export function LoginPage({ onLogged }: { onLogged: (me: Me) => void }) {
             <svg aria-hidden="true" width="20" height="20" viewBox="0 0 18 18"><path fill="#f25022" d="M1 1h7.4v7.4H1z"/><path fill="#7fba00" d="M9.6 1H17v7.4H9.6z"/><path fill="#00a4ef" d="M1 9.6h7.4V17H1z"/><path fill="#ffb900" d="M9.6 9.6H17V17H9.6z"/></svg>
             <span>{t("login.microsoft")}</span>
           </button>
-          <button className="btn sso-btn" type="button" onClick={() => (providers.google ? startGoogle() : startSso("google"))}>
+          <button className="btn sso-btn" type="button" onClick={startGoogle}>
             <GoogleIcon />
             <span>{t("login.google")}</span>
           </button>

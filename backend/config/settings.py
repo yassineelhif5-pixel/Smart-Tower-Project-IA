@@ -3,6 +3,7 @@
 Tous les paramètres sensibles viennent des variables d'environnement (voir .env.example).
 Le démarrage échoue avec un message explicite si un paramètre obligatoire manque.
 """
+import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -177,9 +178,21 @@ SPECTACULAR_SETTINGS = {
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s : %(message)s"}},
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": env.get("DJANGO_LOG_LEVEL", "INFO")},
 }
+# Développement : journal fichier (erreurs avec trace complète), ex. LOG_FILE=logs/backend.log dans .env.
+LOG_FILE = env.get("LOG_FILE", "")
+if LOG_FILE:
+    _log_path = (BASE_DIR / LOG_FILE) if not os.path.isabs(LOG_FILE) else Path(LOG_FILE)
+    try:
+        _log_path.parent.mkdir(parents=True, exist_ok=True)
+        LOGGING["handlers"]["file"] = {"class": "logging.FileHandler", "filename": str(_log_path), "encoding": "utf-8",
+                                       "level": "INFO", "formatter": "plain"}
+        LOGGING["root"]["handlers"].append("file")
+    except OSError:
+        pass
 
 
 

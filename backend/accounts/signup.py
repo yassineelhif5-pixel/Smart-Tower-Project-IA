@@ -63,6 +63,10 @@ def send_verification(profile):
     profile.verify_sent_at = timezone.now()
     profile.save(update_fields=["verify_hash", "verify_sent_at"])
     user = profile.user
+    from django.conf import settings
+    if settings.DEBUG:  # développement : lien lisible dans le journal pour tester sans boîte mail
+        import logging
+        logging.getLogger("accounts.signup").info("Lien de confirmation (DEBUG) pour %s : %s", user.email, _verify_link(token))
     return _send(user.email, "Confirmez votre adresse e-mail · Control Tower",
                  f"Bienvenue {user.first_name or ''}".strip(),
                  "Confirmez votre adresse e-mail pour activer votre compte Control Tower. "
