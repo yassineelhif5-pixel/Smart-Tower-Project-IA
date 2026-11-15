@@ -54,7 +54,7 @@ function SupportWorkspace() {
           <td><b>{row.title}</b><br /><small>{row.description}</small>{row.aiReply && <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f1f5ff" }}><b>⚡ THOR · Première analyse</b><p>{row.aiAnalysis}</p><small>{row.aiReply}</small></div>}</td><td>{row.category}</td>
           <td><select className="inp" aria-label={`Agent assigné à ${row.title}`} value={data.data!.staff.find((s) => s.username === row.assignedTo)?.id ?? ""}
             onChange={(e) => update(row.id, { assignedTo: e.target.value ? Number(e.target.value) : null })}>
-            <option value="">Non assignée</option>{data.data.staff.map((staff) => <option key={staff.id} value={staff.id}>{staff.username}</option>)}
+            <option value="">Non assignée</option>{data.data!.staff.map((staff) => <option key={staff.id} value={staff.id}>{staff.username}</option>)}
           </select></td><td><select className="inp" aria-label={`État de ${row.title}`} value={row.status} disabled={busy}
             onChange={(e) => update(row.id, { status: e.target.value })}>{Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></td>
         </tr>)}{data.data.requests.length === 0 && <tr><td colSpan={6} className="muted">Aucune demande à traiter.</td></tr>}

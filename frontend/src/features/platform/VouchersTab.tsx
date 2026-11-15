@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { platformApi } from "../../api/endpoints";
 import { useApi } from "../../api/useApi";
-import { Card, ErrorNotice, Field, Loading, Modal, Pill, useAction } from "../../components/ui";
+import { Card, ErrorNotice, Field, Loading, Modal, useAction } from "../../components/ui";
 import type { Offer, VoucherIssueResult } from "../../types/api";
 import { fmtDate } from "../../components/ui";
 import { MODULE_GROUPS, ModuleChoices } from "./OffersTab";

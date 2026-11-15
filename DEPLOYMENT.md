@@ -4,6 +4,12 @@ Mis à jour le 2026-11-01 (version 1.3.1).
 
 ## Architecture du déploiement
 
+> Depuis la v1.6 : configuration classique (sans les « Services » bêta). L'écran est construit depuis `frontend/`
+> (`frontend/dist`, servi en statique) ; l'API Django est une fonction Python Vercel (`api/index.py`, qui embarque
+> `backend/`) recevant toutes les requêtes `/api/…`. Réglages du projet Vercel : **Root Directory vide (racine du dépôt)**,
+> Framework « Other », Node 22.x ; `vercel.json` fixe l'installation, le build, le dossier de sortie et le routage.
+
+
 Un seul projet Vercel, un seul domaine (`https://<projet>.vercel.app`) :
 
 | Chemin | Service Vercel | Contenu |

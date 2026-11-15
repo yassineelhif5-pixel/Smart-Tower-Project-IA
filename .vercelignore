@@ -1,11 +1,16 @@
-# Fichiers inutiles au déploiement Vercel (la démo index.html reste publiée par GitHub Pages).
-index.html
-.nojekyll
-.github/
-supabase/
+# Fichiers inutiles au déploiement Vercel (la démo /index.html reste publiée par GitHub Pages).
+/index.html
+/.nojekyll
+/.github/
+/supabase/
+/Project-Control-Tower-v1.1.1-lot2a/
+/Project-Control-Tower-v1.3.0-SaaS/
+/Project-Control-tower.zip
 **/node_modules/
 **/.venv/
+**/.venv313/
 **/__pycache__/
 **/*.pyc
 **/.env
 **/.env.*
+!**/.env.example

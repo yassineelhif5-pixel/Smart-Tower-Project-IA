@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { platformApi } from "../../api/endpoints";
 import { useApi } from "../../api/useApi";
 import { Card, ErrorNotice, Loading, useAction } from "../../components/ui";
-import type { PlatformTenantRights } from "../../types/api";
 
 export function TenantRightsCard({ tenantId }: { tenantId: number }) {
   const data = useApi(() => platformApi.tenantRights(tenantId), [tenantId]);
@@ -29,7 +28,7 @@ export function TenantRightsCard({ tenantId }: { tenantId: number }) {
           Peut créer des projets
         </label>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 6 }}>
-          {data.data.catalog.filter((c) => c.delegable).map((item) => <label key={item.code} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {data.data!.catalog.filter((c) => c.delegable).map((item) => <label key={item.code} style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input type="checkbox" checked={role.locked || (draft[role.code]?.capabilities ?? role.capabilities).includes(item.code)} disabled={role.locked}
               onChange={() => toggle(role.code, item.code)} />
             {item.domain} · {item.action}
