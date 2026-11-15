@@ -39,11 +39,15 @@ class AdminUserSerializer(serializers.ModelSerializer):
     lastName = serializers.CharField(source="last_name", required=False, allow_blank=True, max_length=150)
     isActive = serializers.BooleanField(source="is_active", required=False)
     authMode = serializers.ChoiceField(source="auth_mode", choices=["standard", "sso", "both"], required=False)
+    company = serializers.CharField(required=False, allow_blank=True, max_length=120)
+    external = serializers.BooleanField(required=False)
+    dailyRate = serializers.DecimalField(source="daily_rate", max_digits=10, decimal_places=2, required=False, allow_null=True, min_value=0)
 
     class Meta:
         model = User
         fields = ["id", "username", "firstName", "lastName", "email", "role", "title", "team", "client",
-                  "isActive", "mustChangePassword", "authMode", "lastLogin", "projectCount", "password"]
+                  "isActive", "mustChangePassword", "authMode", "lastLogin", "projectCount", "password",
+                  "company", "external", "dailyRate"]
 
     def get_projectCount(self, user):
         return user.project_accesses.count()

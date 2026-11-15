@@ -12,7 +12,8 @@ from django.core.exceptions import ImproperlyConfigured
 from . import env
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+# Le fichier .env fait foi en local, y compris après un rechargement automatique du serveur (override).
+load_dotenv(BASE_DIR / ".env", override=True)
 SECRET_KEY = env.get("DJANGO_SECRET_KEY", required=True)
 DEBUG = env.get_bool("DJANGO_DEBUG", False)
 ALLOWED_HOSTS = env.get_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
@@ -47,7 +48,7 @@ PUBLIC_BASE_URL = env.get("PUBLIC_BASE_URL", "").rstrip("/")
 
 # Configuration SMTP proposée par défaut à chaque entreprise (canal e-mail de Configuration › Notifications).
 # Ce ne sont que des valeurs de départ : l'administrateur les modifie dans l'interface. Le mot de passe (clé SMTP)
-# n'est jamais ici : il se saisit dans l'interface et est stocké chiffré (ServiceSecret « smtp_password »).
+# vient de DEFAULT_SMTP_PASSWORD (.env) et est stocké chiffré par entreprise (ServiceSecret « smtp_password »).
 DEFAULT_SMTP_SETTINGS = {
     "host": env.get("DEFAULT_SMTP_HOST", "smtp-relay.brevo.com"),
     "port": int(env.get("DEFAULT_SMTP_PORT", "587") or 587),
@@ -55,6 +56,8 @@ DEFAULT_SMTP_SETTINGS = {
     "username": env.get("DEFAULT_SMTP_USERNAME", ""),
     "from_address": env.get("DEFAULT_SMTP_FROM", ""),
 }
+# Clé SMTP par défaut (fichier .env uniquement) : recopiée chiffrée dans les entreprises qui n'en ont pas encore.
+DEFAULT_SMTP_PASSWORD = env.get("DEFAULT_SMTP_PASSWORD", "")
 
 INSTALLED_APPS = [
     "django.contrib.auth",
@@ -81,6 +84,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "configuration.middleware.PilotConfigMiddleware",
     "configuration.middleware.ApiRequestLogMiddleware",
 ]
 
@@ -187,3 +191,5 @@ PLATFORM_EMAIL_USER = env.get("PLATFORM_EMAIL_USER", "")
 PLATFORM_EMAIL_PASSWORD = env.get("PLATFORM_EMAIL_PASSWORD", "")
 PLATFORM_EMAIL_SECURITY = env.get("PLATFORM_EMAIL_SECURITY", "starttls")
 PLATFORM_EMAIL_FROM = env.get("PLATFORM_EMAIL_FROM", "")
+# Adresse publique de l'application : liens « Ouvrir » des e-mails de notification.
+APP_PUBLIC_URL = env.get("APP_PUBLIC_URL", "").rstrip("/")  # surchargé par Pilote › Configuration ; vide = localhost

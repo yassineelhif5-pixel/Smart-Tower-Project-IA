@@ -78,7 +78,7 @@ class TimesheetHistoryView(APIView):
         while m <= 0:
             y, m = y - 1, m + 12
         start = today.replace(year=y, month=m, day=1)
-        qs = TimeEntry.objects.filter(tenant=user.tenant, work_date__gte=start).select_related("project", "project__client", "person")
+        qs = TimeEntry.objects.filter(tenant=user.tenant, work_date__gte=start).select_related("project", "project__client", "person", "approved_by", "project__tenant")
         if people is not None:
             qs = qs.filter(person_id__in=people)
             if sc == "team":  # les autres membres : uniquement leurs saisies sur les projets de l'équipe
@@ -86,22 +86,25 @@ class TimesheetHistoryView(APIView):
         wanted = request.query_params.get("person")
         if wanted and str(wanted).isdigit():
             qs = qs.filter(person_id=int(wanted))
+        by_week = request.query_params.get("group") == "week"
         groups = defaultdict(lambda: {"entries": [], "projects": {}})
         for e in qs:
-            key = (e.person_id, f"{e.work_date:%Y-%m}")
+            key = (e.person_id, _week_key(e.work_date) if by_week else f"{e.work_date:%Y-%m}")
             g = groups[key]
             g["person"] = e.person
             g["entries"].append(e)
             g["projects"][e.project_id] = e.project
         abs_rows = defaultdict(lambda: Decimal("0"))
         for a in TimeAbsence.objects.filter(tenant=user.tenant, work_date__gte=start, person_id__in=[k[0] for k in groups] or [user.id]):
-            abs_rows[(a.person_id, f"{a.work_date:%Y-%m}")] += a.hours
+            abs_rows[(a.person_id, _week_key(a.work_date) if by_week else f"{a.work_date:%Y-%m}")] += a.hours
         from clientspace.models import ClientDocument
         docs = defaultdict(list)
         for d in ClientDocument.objects.filter(tenant=user.tenant, kind="cra", person_id__in=[k[0] for k in groups] or [0],
                                                period__gte=f"{start:%Y-%m}").select_related("client"):
             docs[(d.person_id, d.period)].append({"id": d.id, "name": d.name, "client": d.client.name, "version": d.version,
-                                                 "days": d.days, "createdAt": d.created_at})
+                                                 "days": d.days, "createdAt": d.created_at, "number": d.number,
+                                                 "generatedBy": (d.meta or {}).get("generatedBy", "automatique"),
+                                                 "approvers": (d.meta or {}).get("approvers", [])})
         User = get_user_model()
         mode = time_approval.approval_mode(user.tenant)
         out = []
@@ -111,11 +114,11 @@ class TimesheetHistoryView(APIView):
                 counts[e.approval_status] += e.hours
             state = next((s for s in ("rejected", "draft", "pending", "client", "approved") if counts.get(s)), "empty")
             waiting = []
-            pend_projects = {e.project_id: e.project for e in g["entries"] if e.approval_status == "pending"}
-            if pend_projects:
+            pend = {(e.project_id, e.approval_step): e.project for e in g["entries"] if e.approval_status == "pending"}
+            if pend:
                 ids = set()
-                for p in pend_projects.values():
-                    ids |= time_approval.approvers(p, mode)
+                for (_, step), p in pend.items():
+                    ids |= time_approval.approvers(p, mode, step=step)
                 ids.discard(pid)
                 waiting += [{"who": u.display_name, "role": u.role.label if u.role else "", "step": "Validation interne"}
                             for u in User.objects.filter(pk__in=ids).select_related("role")]
@@ -140,10 +143,15 @@ class TimesheetHistoryView(APIView):
                 "total": _hours(unit, hpd, sum(counts.values(), Decimal("0"))),
                 "absences": _hours(unit, hpd, abs_rows.get((pid, period), Decimal("0"))),
                 "projects": [{"id": p.id, "name": p.name, "client": p.client.name} for p in g["projects"].values()],
-                "waiting": waiting, "cra": docs.get((pid, period), []),
+                "waiting": waiting, "cra": docs.get((pid, period[:7] if not by_week else _week_month(period)), []),
+                "periodLabel": _week_label(period) if by_week else None,
+                "pipelines": _pipelines(g["entries"], user.tenant),
+                "lastValidation": _last_validation(g["entries"]),
+                "timeline": _timeline(g["entries"], docs.get((pid, period[:7] if not by_week else _week_month(period)), []),
+                                      pid, period, by_week),
                 "mine": pid == user.id,
             })
-        return Response({"scope": sc, "unit": unit, "rows": out,
+        return Response({"scope": sc, "unit": unit, "rows": out, "group": "week" if by_week else "month",
                          "people": sorted({(r["person"]["id"], r["person"]["name"]) for r in out}, key=lambda x: x[1]),
                          "canConfigure": bool(user.is_app_admin)})
 
@@ -159,6 +167,9 @@ class TimesheetCraView(APIView):
         if not (people is None or d.person_id in people or d.readers.filter(pk=user.pk).exists()):
             raise ApiError("FORBIDDEN_PERMISSION", "Ce CRA n'est pas dans votre périmètre.", status.HTTP_403_FORBIDDEN)
         audit.record(user, f"Client {d.client.name}", "CRA consulté (historique des temps)", "", d.name)
+        if request.query_params.get("preview"):
+            from clientspace.preview import preview_response
+            return preview_response(d.content, d.mime, d.name)
         resp = HttpResponse(bytes(d.content), content_type=d.mime)
         resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(d.name)}"
         return resp
@@ -206,3 +217,134 @@ class PilotHistorySettingsView(APIView):
         if not request.user.is_platform_admin:
             raise ApiError("FORBIDDEN_PERMISSION", "Réservé au Pilote.", status.HTTP_403_FORBIDDEN)
         return Response(_save(Tenant.objects.get(pk=tenant_id), request.data.get("roles"), request.user))
+
+
+
+# --------------------------------------------------------------------------- semaines et circuit de validation
+def _week_key(d):
+    y, w, _ = d.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def _week_bounds(key):
+    from datetime import date
+    y, w = key.split("-W")
+    monday = date.fromisocalendar(int(y), int(w), 1)
+    from datetime import timedelta
+    return monday, monday + timedelta(days=6)
+
+
+def _week_label(key):
+    a, b = _week_bounds(key)
+    return f"Semaine {int(key.split('-W')[1])} · du {a:%d/%m} au {b:%d/%m/%Y}"
+
+
+def _week_month(key):
+    return f"{_week_bounds(key)[0]:%Y-%m}"
+
+
+def _steps(project):
+    """Étapes du circuit de validation du projet : libellés lisibles (avec les noms des valideurs)."""
+    from .time_workflow_view import _describe
+    users = {u.id: u.display_name for u in get_user_model().objects.filter(tenant=project.tenant, is_active=True)}
+    wf = time_approval.workflow_of(project)
+    if wf:
+        chain = _describe(project, wf, users)
+        internal = chain[:-1] if wf.get("client") else chain
+        return internal, bool(wf.get("client"))
+    mode = time_approval.approval_mode(project.tenant)
+    if mode == "auto":
+        return [], time_approval.client_step(project.tenant)
+    label = {"pm": f"Chef de projet ({users.get(project.pm_id, '—')})", "pm_tl": "Chef de projet ou Tech Lead",
+             "role": "Responsable habilité", "admin": "Administrateurs"}.get(mode, time_approval.MODES[mode])
+    return [label], time_approval.client_step(project.tenant)
+
+
+def _progress(entry, n_internal, client):
+    """Position de la saisie dans le circuit : 0 = envoi à faire, 1..n = valideur interne, n+1 = client, fin = validé."""
+    if entry.approval_status in ("draft", "rejected"):
+        return 0
+    if entry.approval_status == "pending":
+        return 1 + min(entry.approval_step, max(0, n_internal - 1))
+    if entry.approval_status == "client":
+        return 1 + n_internal
+    return 1 + n_internal + (1 if client else 0)
+
+
+def _pipelines(entries, tenant):
+    """Par projet : étapes faites, en cours, à venir, avec le nombre de saisies à chaque étape."""
+    out = []
+    by_project = defaultdict(list)
+    for e in entries:
+        by_project[e.project_id].append(e)
+    for pid, items in by_project.items():
+        project = items[0].project
+        internal, client = _steps(project)
+        labels = ["Envoi en validation"] + [f"Validation {lbl}" for lbl in internal] + (["Validation client"] if client else [])
+        final = len(labels)
+        pos = [_progress(e, len(internal), client) for e in items]
+        current = min(pos)
+        counts = defaultdict(int)
+        for x in pos:
+            counts[x] += 1
+        steps = []
+        for i, lbl in enumerate(labels):
+            state = "done" if i < current else ("current" if i == current else "todo")
+            steps.append({"label": lbl, "state": state, "count": counts.get(i, 0)})
+        steps.append({"label": "Validé", "state": "done" if current >= final else "todo", "count": counts.get(final, 0)})
+        out.append({"project": project.name, "steps": steps, "complete": current >= final,
+                    "next": labels[current] if current < final else None})
+    return out
+
+
+def _last_validation(entries):
+    done = [e for e in entries if e.approved_at and e.approved_by_id and e.approval_status in ("pending", "client", "approved")]
+    if not done:
+        return None
+    last = max(done, key=lambda e: e.approved_at)
+    return {"by": last.approved_by.display_name if last.approved_by else "", "at": last.approved_at,
+            "status": last.approval_status}
+
+
+
+def _timeline(entries, cras, person_id, period, by_week):
+    """Historique complet de la période : envois, validations (qui, quelle étape, quand), refus, génération des CRA."""
+    from datetime import date
+    from configuration.models import AuditEvent
+    from clientspace.billing import bounds
+    events = defaultdict(lambda: {"count": 0, "hours": Decimal("0")})
+    for e in entries:
+        for a in (e.approvals or []):
+            at = str(a.get("at", ""))
+            key = (at[:16], a.get("decision"), a.get("by", ""), a.get("step", ""))
+            events[key]["count"] += 1
+            events[key]["hours"] += e.hours
+        if e.approval_status == "rejected" and e.reject_reason and not any(a.get("decision") == "rejected" for a in (e.approvals or [])):
+            key = (e.approved_at.isoformat()[:16] if e.approved_at else "", "rejected", e.approved_by.display_name if e.approved_by_id else "", "")
+            events[key]["count"] += 1
+            events[key]["hours"] += e.hours
+            events[key]["reason"] = e.reject_reason
+        if e.approval_status == "rejected" and e.reject_reason:
+            for key in list(events):
+                if key[1] == "rejected" and key[2] == (e.approved_by.display_name if e.approved_by_id else key[2]):
+                    events[key]["reason"] = e.reject_reason
+    out = []
+    for (at, decision, by, step), v in events.items():
+        out.append({"at": at, "kind": "validation" if decision == "approved" else "refus", "by": by, "step": step,
+                    "count": v["count"], "hours": v["hours"], "reason": v.get("reason", "")})
+    # Envois en validation (journal)
+    first, last = (_week_bounds(period) if by_week else bounds(period))
+    for ev in AuditEvent.objects.filter(actor_id=person_id, event="Période envoyée en validation").order_by("-at")[:200]:
+        try:
+            a, b = ev.new_value.split(" : ")[0].split(" → ")
+            a, b = date.fromisoformat(a.strip()), date.fromisoformat(b.strip())
+        except (ValueError, IndexError):
+            continue
+        if a <= last and b >= first:
+            out.append({"at": ev.at.isoformat()[:16], "kind": "envoi", "by": "", "step": f"du {a:%d/%m} au {b:%d/%m}",
+                        "count": 0, "hours": 0, "reason": ev.new_value.split(" : ", 1)[1] if " : " in ev.new_value else ""})
+    for c in cras:
+        out.append({"at": c["createdAt"].isoformat()[:16] if hasattr(c["createdAt"], "isoformat") else str(c["createdAt"])[:16],
+                    "kind": "cra", "by": c.get("generatedBy", ""), "step": f"CRA v{c['version']} · {c['client']}" + (f" · facture {c['number']}" if c.get("number") else ""),
+                    "count": 0, "hours": 0, "reason": ("Validé par " + ", ".join(c["approvers"])) if c.get("approvers") else ""})
+    return sorted(out, key=lambda x: x["at"], reverse=True)

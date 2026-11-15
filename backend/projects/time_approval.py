@@ -150,7 +150,41 @@ def decidable_project_ids(user):
     return {p.id for p in projects if user.id in approvers(p, mode)}
 
 
-def can_decide(user, entry):
+def user_step(user, entry):
+    """Étape que l'utilisateur peut valider : l'étape courante, ou une étape ultérieure du workflow (validation
+    anticipée : le valideur suivant, ex. le chef de projet, valide sans attendre le précédent). None sinon."""
     if entry.person_id == user.id or entry.tenant_id != user.tenant_id:
-        return False
-    return user.is_app_admin or user.id in approvers(entry.project, step=entry.approval_step)
+        return None
+    if user.is_app_admin or user.id in approvers(entry.project, step=entry.approval_step):
+        return entry.approval_step
+    wf = workflow_of(entry.project)
+    if wf:
+        for i in range(entry.approval_step + 1, len(wf["steps"])):
+            ids = step_approvers(entry.project, i)
+            if user.id in ids | delegates_of(entry.project.tenant, ids):
+                return i
+    return None
+
+
+def can_decide(user, entry):
+    return user_step(user, entry) is not None
+
+
+def waiting_for(entry):
+    """« Tech Lead 1/2 : Nom » — qui doit valider l'étape courante."""
+    from django.contrib.auth import get_user_model
+    ids = approvers(entry.project, step=entry.approval_step)
+    names = sorted(u.display_name for u in get_user_model().objects.filter(pk__in=ids))
+    return f"{step_label(entry.project, entry.approval_step)} : {', '.join(names) or '—'}"
+
+
+
+def step_label(project, step):
+    """Libellé de l'étape interne courante (pour la trace des validations et le CRA)."""
+    wf = workflow_of(project)
+    if wf:
+        st = wf["steps"][min(step, len(wf["steps"]) - 1)]
+        return {"pm": "Chef de projet", "tl": "Tech Lead", "user": "Valideur désigné", "admin": "Administrateur"}.get(st["kind"], "Valideur") \
+            + (f" {step + 1}/{len(wf['steps'])}" if len(wf["steps"]) > 1 else "")
+    return {"pm": "Chef de projet", "pm_tl": "Chef de projet / Tech Lead", "role": "Responsable", "admin": "Administrateur"}.get(
+        approval_mode(project.tenant), "Valideur")

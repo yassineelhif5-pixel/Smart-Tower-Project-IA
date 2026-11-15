@@ -21,6 +21,7 @@ export interface Me {
   isSupport: boolean;
   maintenanceEnabled: boolean;
   clientSpaceEnabled?: boolean;
+  excelImportEnabled?: boolean;
   tenant: { slug: string; name: string; status: string } | null;
   mustChangePassword: boolean;
   permissions: Record<string, Flags>;
@@ -43,6 +44,9 @@ export interface AdminUser {
   mustChangePassword: boolean;
   lastLogin: string | null;
   projectCount: number;
+  company?: string;
+  external?: boolean;
+  dailyRate?: string | number | null;
 }
 
 export type UserInput = Partial<Omit<AdminUser, "id" | "mustChangePassword" | "lastLogin" | "projectCount">> & {
@@ -147,7 +151,8 @@ export interface TimeEntryRow {
   id: number; project: string; projectName: string; action: string | null; actionName: string;
   user: number; userName: string; workDate: string; amount: string; unit: "hour" | "day";
   status: "draft" | "pending" | "client" | "approved" | "rejected"; approvedBy: string | null; approvedAt: string | null; line?: string;
-  canDecide?: boolean;
+  canDecide?: boolean; projectCode?: string; lineName?: string; hours?: string;
+  stepLabel?: string; early?: boolean; waitingFor?: string;
 }
 
 export interface TimeEntries {

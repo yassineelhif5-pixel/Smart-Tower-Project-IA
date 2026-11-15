@@ -181,6 +181,11 @@ class MyAlertsView(APIView):
             run_daily(user.tenant, today)
         except Exception:
             pass
+        try:  # échéances d'actions (une fois par jour) et récaps hebdomadaires programmés par les CP
+            from .notif_jobs import run_all
+            run_all(user.tenant)
+        except Exception:
+            pass
         try:  # CRA et factures du mois écoulé (une fois par jour et par entreprise)
             from clientspace.billing import run_monthly
             run_monthly(user.tenant, today)

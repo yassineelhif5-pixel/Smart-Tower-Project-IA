@@ -14,12 +14,13 @@ type Status = "draft" | "pending" | "client" | "approved" | "rejected";
 type Sheet = {
   unit: "hour" | "day"; full: number; hoursPerDay: number; from: string; to: string; approval: string;
   projects: SheetProject[];
-  entries: { id: number; project: string; line: string; date: string; amount: number; status: Status }[];
+  entries: { id: number; project: string; line: string; date: string; amount: number; status: Status; rejectReason?: string; editable?: boolean }[];
   absences: { id: number; kind: string; date: string; amount: number; status: "draft" | "submitted" }[];
   absenceKinds: { code: string; label: string }[];
   days: { date: string; working: boolean; holiday: string | null; total: number; complete: boolean; over: boolean }[];
-  incomplete: string[]; drafts: number; canSubmit: boolean;
-  sent?: { entries: number; absences: number; auto: boolean };
+  incomplete: string[]; drafts: number; canSubmit: boolean; gap: number; rejectedLeft: number;
+  rejected: { id: number; project: string; date: string; amount: number; reason: string }[];
+  sent?: { entries: number; absences: number; auto: boolean; gapDays?: number };
 };
 
 const STATUS: Record<string, string> = { draft: "Brouillon", pending: "En validation", client: "Chez le client", approved: "Validé", rejected: "Refusé", submitted: "Envoyée" };
@@ -44,6 +45,7 @@ export function MySheet() {
   const [error, setError] = useState<unknown>(null);
   const [edit, setEdit] = useState<Record<string, string>>({});
   const [extraRows, setExtraRows] = useState<string[]>([]);
+  const [pickProject, setPickProject] = useState("");
   const [extraAbs, setExtraAbs] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState(false);
@@ -136,7 +138,7 @@ export function MySheet() {
     if (cells.length) void save(cells, [], []);
   };
   const submit = () => void run(() => api.post<Sheet>("/timesheets/sheet/submit", { from: iso(start), to: iso(end) }))
-    .then((s) => { if (!s) return; setSheet(s); toast(s.sent?.auto ? "Période enregistrée et validée automatiquement" : `Période envoyée en validation (${s.sent?.entries ?? 0} saisie(s), ${s.sent?.absences ?? 0} absence(s))`); }, () => undefined);
+    .then((s) => { if (!s) return; setSheet(s); toast((s.sent?.auto ? "Période enregistrée et validée automatiquement" : `Période envoyée en validation (${s.sent?.entries ?? 0} saisie(s), ${s.sent?.absences ?? 0} absence(s))`) + (s.sent?.gapDays ? ` · ${s.sent.gapDays} jour(s) complété(s) en absence` : "")); }, () => undefined);
 
   const move = (dir: number) => setAnchor(view === "day" ? add(anchor, dir) : view === "week" ? add(anchor, 7 * dir) : new Date(anchor.getFullYear(), anchor.getMonth() + dir, 1));
   const label = view === "day" ? start.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
@@ -147,11 +149,11 @@ export function MySheet() {
     return view === "month" ? <><small>{dt.toLocaleDateString("fr-FR", { weekday: "narrow" })}</small>{dt.getDate()}</>
       : <><small>{dt.toLocaleDateString("fr-FR", { weekday: "short" })}</small>{dt.getDate()}</>;
   };
-  const input = (k: string, saved: number | undefined, status: string | undefined, onCommit: () => void, aria: string, off: boolean) => (
-    locked(status) ? <span className={`sh-lock ${status}`} title={STATUS[status!]}>{fmt(saved ?? 0)}</span> : (
-      <input className={`sh-in ${status === "rejected" ? "rej" : ""} ${status === "draft" ? "draft" : ""}`} inputMode="decimal" placeholder={off ? "" : "·"} aria-label={aria}
+  const input = (k: string, saved: number | undefined, status: string | undefined, onCommit: () => void, aria: string, off: boolean, editable?: boolean) => (
+    locked(status) && !editable ? <span className={`sh-lock ${status}`} title={`${STATUS[status!]} · CRA généré : saisie figée`}>{fmt(saved ?? 0)}</span> : (
+      <input className={`sh-in ${status === "rejected" ? "rej" : ""} ${status === "draft" ? "draft" : ""} ${locked(status) ? `sent ${status}` : ""}`} inputMode="decimal" placeholder={off ? "" : "·"} aria-label={aria}
         value={cellVal(k, saved)} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} onBlur={onCommit}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} title={status ? STATUS[status] : undefined} />
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} title={locked(status) ? `${STATUS[status!]} — encore modifiable (CRA non généré) : la modifier la remettra en brouillon, à renvoyer.` : status === "rejected" ? `Refusé : ${sheet.entries.find((x) => `e|${x.project}|${x.line}|${x.date}` === k)?.rejectReason || "à corriger"}` : status ? STATUS[status] : undefined} />
     ));
 
   return (
@@ -180,6 +182,16 @@ export function MySheet() {
           ? <>📅 Saisie <b>en jours</b> : indiquez <b>1</b> pour une journée complète et <b>0,5</b> pour une demi-journée (présence ou absence).</>
           : <>⏱️ Saisie <b>en heures</b> : <b>1 journée = {fmt(sheet.hoursPerDay)} h</b>. Une demi-journée = {fmt(sheet.hoursPerDay / 2)} h.</>}
       </p>
+
+      {sheet.rejected.length > 0 && (
+        <div className="sh-rejected" role="alert">
+          <b>⚠️ {sheet.rejected.length} saisie(s) refusée(s) à corriger puis renvoyer</b>
+          {sheet.rejected.map((x) => (
+            <div key={x.id}>• {new Date(`${x.date}T00:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })} — {x.project} ({fmt(x.amount)} {unit}) : <i>{x.reason || "sans motif"}</i></div>
+          ))}
+          <small>Modifiez la case en rouge (nouvelle durée, ou 0 pour la supprimer), puis cliquez sur « Envoyer en validation ».</small>
+        </div>
+      )}
 
       <div className="sh-progress" aria-label="Complétude de la période">
         <div className="sh-bar"><i style={{ width: `${workDays ? (doneDays / workDays) * 100 : 100}%` }} /></div>
@@ -210,7 +222,7 @@ export function MySheet() {
                 {days.map((d) => {
                   const e = entryOf(r.key, d.date);
                   return <td key={d.date} className={`${d.date === today ? "today" : ""} ${!d.working ? "off" : ""}`}>
-                    {input(`e|${r.key}|${d.date}`, e?.amount, e?.status, () => commitCell(r.key, d.date), `${r.project.name}${r.line ? ` ${r.line.label}` : ""} ${d.date}`, !d.working)}
+                    {input(`e|${r.key}|${d.date}`, e?.amount, e?.status, () => commitCell(r.key, d.date), `${r.project.name}${r.line ? ` ${r.line.label}` : ""} ${d.date}`, !d.working, e?.editable)}
                   </td>;
                 })}
                 <td className="sh-tot">{rowTotal(r.key) ? `${fmt(rowTotal(r.key))} ${unit}` : "—"}</td>
@@ -219,10 +231,19 @@ export function MySheet() {
             {addable.length > 0 && (
               <tr className="sh-add">
                 <td colSpan={days.length + 2}>
-                  <select className="inp" aria-label="Ajouter une ligne de saisie" value="" onChange={(e) => e.target.value && setExtraRows([...extraRows, e.target.value])}>
-                    <option value="">+ Ajouter une ligne de saisie…</option>
-                    {addable.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
-                  </select>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <b style={{ fontSize: 13 }}>+ Saisir sur :</b>
+                    <select className="inp" style={{ maxWidth: 260 }} aria-label="Projet" value={pickProject} onChange={(e) => setPickProject(e.target.value)}>
+                      <option value="">1. Choisir le projet…</option>
+                      {[...new Map(addable.map((a) => [a.key.split("|")[0], a.label.split(" › ")[0]])).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                    </select>
+                    <select className="inp" style={{ maxWidth: 300 }} aria-label="Ligne du projet" value="" disabled={!pickProject}
+                      onChange={(e) => { if (e.target.value) { setExtraRows([...extraRows, e.target.value]); setPickProject(""); } }}>
+                      <option value="">2. Choisir la ligne déclarée…</option>
+                      {addable.filter((a) => a.key.startsWith(`${pickProject}|`)).map((a) => <option key={a.key} value={a.key}>{a.label.split(" › ")[1]}</option>)}
+                    </select>
+                    <small className="muted">Lignes définies par le client ou l’administrateur (Paramètres du projet → Lignes de saisie).</small>
+                  </div>
                 </td>
               </tr>
             )}
@@ -267,9 +288,14 @@ export function MySheet() {
           <small>Une journée ouvrée est complète quand présence + absences = {fmt(sheet.full)} {unit}.</small>
         </div>
         {sheet.canSubmit ? (
-          <button type="button" className="btn primary" disabled={busy || saving} onClick={submit}>
-            {sheet.approval === "auto" ? "Valider la période" : "📤 Envoyer en validation"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {sheet.incomplete.length > 0 && <small className="sh-todo">{fmt(sheet.gap)} {unit} non saisi(es) sur {sheet.incomplete.length} jour(s) : ce temps sera déclaré en absence (« Absence / temps non saisi ») à l’envoi.</small>}
+            <button type="button" className="btn primary" disabled={busy || saving} onClick={submit}>
+              {sheet.approval === "auto" ? "Valider la période" : "📤 Envoyer en validation"}
+            </button>
+          </div>
+        ) : sheet.rejectedLeft > 0 ? (
+          <small className="sh-todo">Corrigez les {sheet.rejectedLeft} saisie(s) refusée(s) avant de renvoyer la période.</small>
         ) : sheet.incomplete.length ? (
           <small className="sh-todo">Encore {sheet.incomplete.length} jour(s) à compléter ({sheet.incomplete.slice(0, 4).map((d) => parse(d).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" })).join(", ")}{sheet.incomplete.length > 4 ? "…" : ""}) avant l’envoi en validation.</small>
         ) : <small className="sh-done">{sheet.entries.some((e) => e.status === "pending" || e.status === "client") ? "✓ Période complète et envoyée en validation." : sheet.entries.length ? "✓ Période complète et validée." : "✓ Période complète."}</small>}

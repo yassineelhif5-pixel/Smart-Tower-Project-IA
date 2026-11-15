@@ -109,13 +109,23 @@ class PortalTimesheetsView(APIView):
         people = sorted([{"id": k, "name": v["name"], "role": v["role"], "hours": v["hours"], "days": (v["hours"] / hpd).quantize(Q2),
                           "amount": _money(v["amount"]), "status": {s: (h / hpd).quantize(Q2) for s, h in v["status"].items()},
                           "projects": sorted(v["projects"])} for k, v in by_person.items()], key=lambda x: -x["days"])
+        by_project_out = [{"id": k, "name": v.get("name", k), "days": (v["hours"] / hpd).quantize(Q2), "amount": _money(v["amount"])} for k, v in by_project.items()]
+        totals = {"days": sum((x["days"] for x in people), Decimal("0")), "amount": sum((x["amount"] for x in people), Decimal("0"))}
+        from .client_rates import hide_amounts
+        hidden = hide_amounts(request.user, {pr.client_id for pr in projects})
+        if hidden:  # TJM et montants non autorisés pour ce client
+            for coll in (rows, people, by_project_out):
+                for x in coll:
+                    x["amount"] = None
+            totals["amount"] = None
         return Response({
+            "amountsHidden": hidden,
             "projects": [{"id": pr.id, "code": pr.code, "name": pr.name, "client": pr.client.name, "status": pr.status,
                           "statusLabel": STATUS_LABEL.get(pr.status, pr.status)} for pr in _projects(request.user)],
             "selectedProjects": len(projects),
             "people": people,
-            "byProject": [{"id": k, "name": v.get("name", k), "days": (v["hours"] / hpd).quantize(Q2), "amount": _money(v["amount"])} for k, v in by_project.items()],
-            "totals": {"days": sum((x["days"] for x in people), Decimal("0")), "amount": sum((x["amount"] for x in people), Decimal("0"))},
+            "byProject": by_project_out,
+            "totals": totals,
             "rows": rows, "hoursPerDay": hpd,
             "isClient": bool(request.user.role and not request.user.role.internal),
         })
@@ -157,6 +167,14 @@ class PortalBillingView(APIView):
                         "days": (c["hours"] / hpd).quantize(Q2), "amount": _money(c["amount"]), "state": st,
                         "invoice": docs[(pid, period)].get("invoice"), "cra": docs[(pid, period)].get("cra")})
         months_list = sorted({x["period"] for x in out}, reverse=True)
+        from .client_rates import hide_amounts
+        if hide_amounts(request.user, clients):  # TJM et montants non autorisés par l'administrateur pour ce client
+            for x in out:
+                x["amount"] = None
+                for k in ("invoice", "cra"):
+                    if x[k]:
+                        x[k] = {**x[k], "ht": None, "ttc": None}
+            return Response({"rows": out, "months": months_list, "totals": {m_: None for m_ in months_list}, "amountsHidden": True})
         return Response({"rows": out, "months": months_list,
                          "totals": {m_: _money(sum((x["amount"] for x in out if x["period"] == m_), Decimal("0"))) for m_ in months_list}})
 

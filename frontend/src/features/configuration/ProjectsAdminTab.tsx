@@ -5,6 +5,7 @@ import { adminApi } from "../../api/endpoints";
 import { useApi } from "../../api/useApi";
 import { Card, ErrorNotice, Field, Loading, useAction } from "../../components/ui";
 import type { AdminProject, Me } from "../../types/api";
+import { ExcelImportAccessCard } from "../import/ExcelImportAccess";
 
 const EMPTY = { code: "", name: "", client: "", method: "", description: "", startDate: "", endDate: "", pm: "", tl: "", projectType: "new", baseProject: "", baseVersion: "" };
 const METHODS = ["Scrum", "Cycle en V", "Kanban", "Hybride", "Régie"];
@@ -155,6 +156,7 @@ export function ProjectsAdminTab({ me }: { me: Me }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <ExcelImportAccessCard url="/imports/excel/profiles" />
       {notice && (
         <div className="callout ok" role="status">
           {notice}

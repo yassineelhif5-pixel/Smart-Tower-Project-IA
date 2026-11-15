@@ -97,12 +97,18 @@ def default_message(row):
 
 
 def platform_smtp():
-    if not getattr(settings, "PLATFORM_EMAIL_HOST", ""):
+    """Connexion SMTP de la plateforme (réglage du Pilote, sinon .env) ; None si non configuré."""
+    from configuration.mailer import platform_conf
+    p = platform_conf(True)
+    if not p["configured"]:
         return None
-    sec = settings.PLATFORM_EMAIL_SECURITY
-    return get_connection("django.core.mail.backends.smtp.EmailBackend", host=settings.PLATFORM_EMAIL_HOST,
-                          port=settings.PLATFORM_EMAIL_PORT, username=settings.PLATFORM_EMAIL_USER or None,
-                          password=settings.PLATFORM_EMAIL_PASSWORD or None, use_tls=sec == "starttls", use_ssl=sec == "ssl", timeout=10)
+    return get_connection("django.core.mail.backends.smtp.EmailBackend", host=p["host"], port=p["port"], username=p["username"] or None,
+                          password=p["password"] or None, use_tls=p["security"] == "starttls", use_ssl=p["security"] == "ssl", timeout=10)
+
+
+def platform_from():
+    from configuration.mailer import platform_conf
+    return platform_conf(False)["from_address"]
 
 
 class ContractReportView(APIView):
@@ -113,7 +119,7 @@ class ContractReportView(APIView):
         for r in rows:
             r["subject"], r["message"] = default_message(r)
         counts = {k: sum(1 for r in rows if r["state"] == k) for k in ("expired", "soon", "watch", "ok", "open")}
-        return Response({"rows": rows, "counts": counts, "smtp": bool(getattr(settings, "PLATFORM_EMAIL_HOST", ""))})
+        return Response({"rows": rows, "counts": counts, "smtp": bool(platform_smtp() is not None)})
 
 
 class ContractRemindView(APIView):
@@ -134,7 +140,7 @@ class ContractRemindView(APIView):
         conn = platform_smtp()
         if conn is not None:
             try:
-                EmailMessage(subject, body, settings.PLATFORM_EMAIL_FROM or settings.PLATFORM_EMAIL_USER, to, connection=conn).send()
+                EmailMessage(subject, body, platform_from(), to, connection=conn).send()
                 sent, via = True, "email"
             except Exception as exc:  # pragma: no cover - dépend du serveur SMTP
                 via = f"échec e-mail ({type(exc).__name__})"

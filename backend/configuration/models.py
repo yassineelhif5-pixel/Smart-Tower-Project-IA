@@ -49,6 +49,13 @@ EVENTS = [
     ("retro_reminder", "Rappel de rétrospective"),
     ("sprint_close", "Rappel de clôture du sprint"),
     ("improvement_overdue", "Action d'amélioration non réalisée"),
+    # Socle de notifications (1.6.0)
+    ("licence_request", "Demande de licence"),
+    ("action_created", "Action créée"),
+    ("action_updated", "Action modifiée"),
+    ("action_due", "Échéance d'action atteinte"),
+    ("weekly_recap", "Récapitulatif hebdomadaire"),
+    ("project_alert", "Alerte projet"),
 ]
 
 TOKEN_PREFIX = "pct_"
@@ -219,3 +226,30 @@ class UserNotificationPreference(TenantOwned):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["user", "event", "channel"], name="uniq_user_event_channel")]
+
+
+class NotificationDelivery(models.Model):
+    """Journal des envois de notifications (e-mail et application) : destinataire, objet, statut, erreur éventuelle.
+    Tenant vide pour les envois de la plateforme (Pilote)."""
+
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE, null=True, blank=True, related_name="+")
+    at = models.DateTimeField(default=timezone.now, db_index=True)
+    event = models.CharField(max_length=30, blank=True)
+    channel = models.CharField(max_length=10, default="email")
+    recipient = models.CharField(max_length=254)
+    subject = models.CharField(max_length=200)
+    status = models.CharField(max_length=10, choices=[("sent", "Envoyé"), ("failed", "Échec"), ("skipped", "Non envoyé")], default="sent")
+    error = models.CharField(max_length=300, blank=True)
+    source = models.CharField(max_length=40, blank=True, help_text="tenant | platform")
+
+    class Meta:
+        ordering = ["-at"]
+
+
+class PlatformSetting(models.Model):
+    """Réglage de la plateforme (Pilote), indépendant des entreprises : ex. URL publique de l'application."""
+
+    key = models.CharField(max_length=60, unique=True)
+    value = models.JSONField(default=dict, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_at = models.DateTimeField(auto_now=True)

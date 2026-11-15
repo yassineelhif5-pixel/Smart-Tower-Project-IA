@@ -50,6 +50,17 @@ function ensureCsrf(): Promise<void> {
   return csrfReady;
 }
 
+/** Pilote dans le menu Configuration : l'entreprise administrée est transmise au serveur (en-tête X-Pilot-Tenant). */
+export const PILOT_TENANT_KEY = "pct.pilotTenant";
+function pilotHeader(): Record<string, string> {
+  try {
+    const t = sessionStorage.getItem(PILOT_TENANT_KEY);
+    return t && window.location.hash.startsWith("#configuration") ? { "X-Pilot-Tenant": t } : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const unsafe = method !== "GET";
   if (unsafe) await ensureCsrf();
@@ -62,6 +73,7 @@ export async function request<T>(method: string, path: string, body?: unknown): 
         Accept: "application/json",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(unsafe ? { "X-CSRFToken": readCookie("csrftoken") ?? "" } : {}),
+        ...pilotHeader(),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });

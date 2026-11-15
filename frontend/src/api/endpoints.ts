@@ -64,7 +64,7 @@ export const authApi = {
 export const timeApi = {
   entries: () => api.get<TimeEntries>("/timesheets"),
   create: (body: { project: string; action?: string; workDate: string; amount: number }) => api.post("/timesheets", body),
-  decide: (id: number, decision: "approved" | "rejected") => api.post(`/timesheets/${id}/decision`, { decision }),
+  decide: (id: number, decision: "approved" | "rejected", comment = "") => api.post(`/timesheets/${id}/decision`, { decision, comment }),
   delegations: () => api.get<TimeDelegations>("/timesheets/delegations"),
   createDelegation: (body: { delegator?: number; delegate: number; startDate: string; endDate: string; reason?: string }) =>
     api.post<TimeDelegationRow>("/timesheets/delegations", body),

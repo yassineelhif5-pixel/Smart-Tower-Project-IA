@@ -81,6 +81,13 @@ def _doc_row(d):
             "projects": d.meta.get("projects", []), "approvers": d.meta.get("approvers", []), "due": d.meta.get("due")}
 
 
+def _hide_cra_money(user, row):
+    from .client_rates import hide_amounts
+    if row["kind"] == "cra" and hide_amounts(user, [row["client"]]):
+        row.update(amountHt=None, amountTtc=None, vatRate=None)
+    return row
+
+
 def _readable(user):
     from django.db.models import Q
     qs = ClientDocument.objects.filter(tenant_id=user.tenant_id).select_related("client", "person")
@@ -123,7 +130,7 @@ class ClientSpaceView(APIView):
             people = [{"id": pid, "name": f"{fn} {ln}".strip() or un} for pid, fn, ln, un in
                       TimeEntry.objects.filter(tenant_id=user.tenant_id, project__client__in=clients, work_date__gte=since)
                       .values_list("person_id", "person__first_name", "person__last_name", "person__username").distinct()]
-        return Response({"clients": out_clients, "documents": [_doc_row(d) for d in docs[:500]],
+        return Response({"clients": out_clients, "documents": [_hide_cra_money(request.user, _doc_row(d)) for d in docs[:500]],
                          "isClient": _is_client(user), "isAdmin": user.is_app_admin, "supportLicense": lic,
                          "levels": [{"code": c, "label": l} for c, l in LEVELS], "people": people,
                          "clientValidationPending": pending.count() if (_is_client(user) or user.is_app_admin) else 0,
@@ -135,7 +142,11 @@ class ClientDocumentView(APIView):
     def get(self, request, doc_id):
         _guard(request.user)
         d = get_object_or_404(_readable(request.user), pk=doc_id)
-        audit.record(request.user, f"Client {d.client.name}", f"{d.get_kind_display()} consulté", "", d.name)
+        cat = {"cra": "CRA", "invoice": "Facture"}.get(d.kind) or ("Rapport budgétaire" if d.meta.get("category") == "budget" else "Document")
+        audit.record(request.user, f"Client {d.client.name}", ("Aperçu" if request.query_params.get("preview") else "Téléchargement") + f" : {cat}", "", d.name)
+        if request.query_params.get("preview"):
+            from .preview import preview_response
+            return preview_response(d.content, d.mime, d.name)
         resp = HttpResponse(bytes(d.content), content_type=d.mime)
         resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(d.name)}"
         resp["X-Content-Type-Options"] = "nosniff"
@@ -161,6 +172,40 @@ class GenerateView(APIView):
         return Response({"created": created, "cra": _doc_row(cra), "invoice": _doc_row(inv) if inv else None})
 
 
+def month_ready(tenant, client, person_id, period):
+    """Le client ne valide que si tout le mois est envoyé : plus aucun brouillon ni refus à corriger, plus rien en
+    validation interne, et chaque jour ouvré du mois (jusqu'à aujourd'hui) couvert par du temps ou une absence."""
+    from datetime import timedelta
+    from projects.models import TimeAbsence
+    from projects.timesheet_sheet import holidays
+    first, last = billing.bounds(period)
+    qs = TimeEntry.objects.filter(tenant=tenant, person_id=person_id, project__client=client, work_date__range=(first, last))
+    left = {s_: qs.filter(approval_status=s_).count() for s_ in ("draft", "rejected", "pending")}
+    if left["draft"] or left["rejected"]:
+        return False, f"{left['draft'] + left['rejected']} saisie(s) du mois ne sont pas encore envoyées (brouillon ou refus à corriger)."
+    if left["pending"]:
+        return False, f"{left['pending']} saisie(s) sont encore en validation interne."
+    hpd = hours_per_day(tenant) or Decimal("8")
+    end = min(last, timezone.localdate())
+    hol = {**holidays(first.year)}
+    per_day = defaultdict(lambda: Decimal("0"))
+    for d, h in TimeEntry.objects.filter(tenant=tenant, person_id=person_id, work_date__range=(first, end)).exclude(approval_status="rejected").values_list("work_date", "hours"):
+        per_day[d] += h
+    for d, h in TimeAbsence.objects.filter(tenant=tenant, person_id=person_id, work_date__range=(first, end)).values_list("work_date", "hours"):
+        per_day[d] += h
+    missing = []
+    d = first
+    while d <= end:
+        if d.weekday() < 5 and d not in hol and per_day[d] < hpd:
+            missing.append(d)
+        d += timedelta(days=1)
+    if missing:
+        return False, f"le mois n'est pas entièrement envoyé ({len(missing)} jour(s) ouvré(s) sans saisie complète, dont le {missing[0]:%d/%m})."
+    if timezone.localdate() < last:
+        return False, "le mois n'est pas terminé : la validation client se fait sur le mois complet."
+    return True, ""
+
+
 class TimeValidationView(APIView):
     """Validation des temps par le client (après le valideur interne), par personne et par mois."""
 
@@ -176,6 +221,8 @@ class TimeValidationView(APIView):
         groups = defaultdict(lambda: {"hours": Decimal("0"), "entries": [], "projects": set()})
         qs = (TimeEntry.objects.filter(tenant_id=request.user.tenant_id, approval_status="client", project__client__in=clients)
               .select_related("person", "project", "action", "approved_by").order_by("work_date"))
+        from projects.timesheet_sheet import line_labels
+        labels = line_labels(request.user.tenant)
         for e in qs:
             key = (e.project.client_id, e.person_id, f"{e.work_date:%Y-%m}")
             g = groups[key]
@@ -184,9 +231,14 @@ class TimeValidationView(APIView):
             g["hours"] += e.hours
             g["projects"].add(e.project.code)
             g["entries"].append({"id": e.id, "date": e.work_date, "project": e.project.code, "task": e.action.title if e.action_id else "Activité générale",
-                                 "hours": e.hours, "approvedBy": e.approved_by.display_name if e.approved_by_id else ""})
-        return Response([{**{k: v for k, v in g.items() if k != "projects"}, "projects": sorted(g["projects"]),
-                          "days": (g["hours"] / hpd).quantize(Decimal("0.01"))} for g in groups.values()])
+                                 "hours": e.hours, "approvedBy": e.approved_by.display_name if e.approved_by_id else "",
+                                 "projectName": e.project.name, "line": labels.get((str(e.project_id), e.line), "") if e.line else ""})
+        out = []
+        for g in groups.values():
+            ready, why = month_ready(request.user.tenant, Client.objects.get(pk=g["client"]), g["person"], g["period"])
+            out.append({**{k: v for k, v in g.items() if k != "projects"}, "projects": sorted(g["projects"]),
+                        "days": (g["hours"] / hpd).quantize(Decimal("0.01")), "ready": ready, "notReady": why})
+        return Response(out)
 
     def post(self, request):
         clients = self._scope(request.user)
@@ -206,10 +258,19 @@ class TimeValidationView(APIView):
         entries = list(qs.select_related("person", "project"))
         if not entries:
             raise ApiError("CONFLICT", "Rien à valider pour cette personne sur ce mois.", status.HTTP_409_CONFLICT)
+        if decision == "approved":
+            ready, why = month_ready(request.user.tenant, client, int(request.data.get("person")), period)
+            if not ready:
+                raise ApiError("CONFLICT", f"Validation impossible : {why}", status.HTTP_409_CONFLICT)
         now = timezone.now()
         for e in entries:  # save() un par un : budget et CRA se recalculent automatiquement (signaux)
             e.approval_status, e.approved_by, e.approved_at = decision, request.user, now
-            e.save(update_fields=["approval_status", "approved_by", "approved_at"])
+            e.reject_reason = f"Client : {comment}" if decision == "rejected" else ""
+            if decision == "rejected":
+                e.approval_step = 0
+            e.approvals = list(e.approvals or []) + [{"by": request.user.display_name, "byId": request.user.pk, "at": now.isoformat(),
+                                                      "step": "Client", "decision": decision}]
+            e.save(update_fields=["approval_status", "approved_by", "approved_at", "reject_reason", "approval_step", "approvals"])
         person = entries[0].person
         audit.record(request.user, f"Client {client.name}", "Temps validés par le client" if decision == "approved" else "Temps refusés par le client",
                      "Chez le client", f"{person.display_name} · {billing.label(period)} · {len(entries)} saisie(s) {comment}")

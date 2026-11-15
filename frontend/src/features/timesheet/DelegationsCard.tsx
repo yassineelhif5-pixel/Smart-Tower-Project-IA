@@ -56,16 +56,16 @@ export function DelegationsCard({ me, admin = false }: { me: Me; admin?: boolean
 
   return (
     <Card
-      title={admin ? "Délégations en cas d’absence" : "Mes absences"}
+      title={admin ? "Délégations de validation" : "Déléguer mes validations"}
       sub={
         admin
           ? "Pendant la période, le délégué valide les temps à la place de l’absent. L’absent garde son droit de valider."
-          : "Vous partez ? Confiez la validation de vos temps à un collègue pour la durée de votre absence."
+          : "Choisissez un délégué qui validera les temps à votre place pendant une période (absence, congés, surcharge). Vous gardez votre droit de valider."
       }
       extra={
         !open && (
           <button className="btn sm" type="button" onClick={() => setOpen(true)}>
-            + {admin ? "Nouvelle délégation" : "Déclarer une absence"}
+            + {admin ? "Nouvelle délégation" : "Choisir un délégué"}
           </button>
         )
       }

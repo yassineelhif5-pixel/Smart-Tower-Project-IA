@@ -61,6 +61,15 @@ def lines_of(project, active_only=False):
     return [x for x in items if x.get("active", True)] if active_only else items
 
 
+def line_labels(tenant):
+    """{(projet, id de ligne): libellé} pour afficher la sous-ligne d'une saisie."""
+    out = {}
+    for pid, items in ((_map(tenant, LINES_KEY) or {}).items()):
+        for x in items or []:
+            out[(str(pid), x.get("id"))] = x.get("label", "")
+    return out
+
+
 def _save_lines(project, items):
     row, _ = AppSetting.objects.select_for_update().get_or_create(tenant=project.tenant, key=LINES_KEY, defaults={"value": {}})
     data = dict(row.value or {})
@@ -215,6 +224,9 @@ def _sheet(user, start, end):
         if hasattr(Project, "status") else list(visible_projects(user).select_related("client"))
     by_line = lines_enabled_for(user)
     entries = list(TimeEntry.objects.filter(person=user, work_date__range=(start, end)).select_related("project"))
+    from clientspace.models import ClientDocument
+    cras = set(ClientDocument.objects.filter(person=user, kind="cra", period__gte=f"{start:%Y-%m}", period__lte=f"{end:%Y-%m}")
+               .values_list("period", "client_id"))
     absences = list(TimeAbsence.objects.filter(person=user, work_date__range=(start, end)))
     days, per_day = [], {}
     for e in entries:
@@ -231,9 +243,10 @@ def _sheet(user, start, end):
         if working and not complete:
             incomplete.append(d.isoformat())
         days.append({"date": d.isoformat(), "working": working, "holiday": hol.get(d), "total": _amount_out(total, unit, hpd),
-                     "complete": complete, "over": total > Decimal("24")})
+                     "complete": complete, "over": total > full})
         d += timedelta(days=1)
-    drafts = sum(1 for e in entries if e.approval_status in ("draft", "rejected")) + sum(1 for a in absences if a.status == "draft")
+    drafts = sum(1 for e in entries if e.approval_status == "draft") + sum(1 for a in absences if a.status == "draft")
+    rejected_left = sum(1 for e in entries if e.approval_status == "rejected")
     proj_out = []
     for p in projects:
         lines = lines_of(p, active_only=True) if by_line else []
@@ -245,18 +258,46 @@ def _sheet(user, start, end):
         "approval": time_approval.approval_mode(user.tenant),
         "projects": proj_out,
         "entries": [{"id": e.id, "project": e.project_id, "line": e.line, "date": e.work_date, "amount": _amount_out(e.hours, unit, hpd),
-                     "status": e.approval_status} for e in entries],
+                     "status": e.approval_status, "rejectReason": e.reject_reason,
+                     "editable": e.approval_status in ("draft", "rejected") or (f"{e.work_date:%Y-%m}", e.project.client_id) not in cras}
+                    for e in entries],
+        "rejected": [{"id": e.id, "project": e.project.name, "date": e.work_date, "amount": _amount_out(e.hours, unit, hpd),
+                      "reason": e.reject_reason} for e in entries if e.approval_status == "rejected"],
         "absences": [{"id": a.id, "kind": a.kind, "date": a.work_date, "amount": _amount_out(a.hours, unit, hpd), "status": a.status}
                      for a in absences],
         "absenceKinds": [{"code": c, "label": l} for c, l in ABSENCE_KINDS],
         "days": days, "incomplete": incomplete, "drafts": drafts,
-        "canSubmit": not incomplete and drafts > 0,
+        "canSubmit": drafts > 0 and rejected_left == 0,
+        "gap": _amount_out(sum((full - per_day.get(date.fromisoformat(d), Decimal("0")) for d in incomplete), Decimal("0")), unit, hpd),
+        "rejectedLeft": rejected_left,
     }
 
 
 def _guard(user):
     if not in_active_tenant(user) or not has_perm(user, "timesheet", "create") or not user.role or not user.role.internal:
         raise ApiError("FORBIDDEN_PERMISSION", "La saisie est réservée aux collaborateurs autorisés.", status.HTTP_403_FORBIDDEN)
+
+
+def cra_exists(user, client_id, day):
+    """Le CRA du mois (personne, client) est-il généré ? Tant qu'il ne l'est pas, les saisies restent modifiables."""
+    from clientspace.models import ClientDocument
+    return ClientDocument.objects.filter(person=user, client_id=client_id, period=f"{day:%Y-%m}", kind="cra").exists()
+
+
+def check_day_limit(user, days, hpd, unit):
+    """Cumul présence + absences d'un jour : jamais plus que le temps autorisé par jour (une journée)."""
+    over = []
+    for day in sorted(set(days)):
+        total = sum((e.hours for e in TimeEntry.objects.filter(person=user, work_date=day).exclude(approval_status="rejected")), Decimal("0"))
+        total += sum((a.hours for a in TimeAbsence.objects.filter(person=user, work_date=day)), Decimal("0"))
+        if total > hpd:
+            over.append((day, total))
+    if over:
+        d, t = over[0]
+        num = lambda v: f"{v.quantize(Decimal('0.01')).normalize():f}".replace(".", ",")
+        fmt = (lambda h: f"{num(h / hpd)} j") if unit == "day" else (lambda h: f"{num(h)} h")
+        raise ApiError("VALIDATION_ERROR", f"Le {d:%d/%m} dépasse le temps autorisé par jour : {fmt(t)} saisis (présence + absences) "
+                                           f"pour {fmt(hpd)} maximum. Réduisez une saisie ou une absence.")
 
 
 class TimeSheetView(APIView):
@@ -287,12 +328,14 @@ class TimeSheetView(APIView):
             return h.quantize(Decimal("0.01"))
 
         from .budget_report import check_entry_allowed
+        touched = []
         with transaction.atomic():
             for c in request.data.get("cells") or []:
                 project = visible.get(c.get("project"))
                 if project is None:
                     raise ApiError("NOT_FOUND", "Projet introuvable.", status.HTTP_404_NOT_FOUND)
                 day = date.fromisoformat(str(c.get("date")))
+                touched.append(day)
                 line = str(c.get("line") or "")
                 active = {x["id"] for x in lines_of(project, active_only=True)} if by_line else set()
                 if active and line not in active:
@@ -301,10 +344,14 @@ class TimeSheetView(APIView):
                     line = ""
                 h = hours_of(c.get("amount"))
                 rows = list(TimeEntry.objects.select_for_update().filter(person=user, project=project, work_date=day, line=line))
-                locked = [r for r in rows if r.approval_status in ("pending", "client", "approved")]
-                editable = [r for r in rows if r.approval_status in ("draft", "rejected")]
+                # Une saisie envoyée (voire validée) reste modifiable tant que le CRA du mois n'est pas généré :
+                # la modifier la remet en brouillon, à renvoyer en validation.
+                frozen = cra_exists(user, project.client_id, day)
+                locked = [r for r in rows if r.approval_status in ("pending", "client", "approved") and frozen]
+                editable = [r for r in rows if r.approval_status in ("draft", "rejected") or (not frozen and r.approval_status in ("pending", "client", "approved"))]
                 if locked and not editable and h > 0:
-                    raise ApiError("CONFLICT", f"{project.name} le {day:%d/%m} est déjà envoyé en validation.", status.HTTP_409_CONFLICT)
+                    raise ApiError("CONFLICT", f"{project.name} le {day:%d/%m} : le CRA du mois est déjà généré, la saisie n'est plus modifiable.",
+                                   status.HTTP_409_CONFLICT)
                 for r in editable[1:]:
                     r.delete()
                 if h == 0:
@@ -316,8 +363,13 @@ class TimeSheetView(APIView):
                     raise ApiError("FORBIDDEN_PERMISSION", blocked, status.HTTP_403_FORBIDDEN)
                 if editable:
                     e = editable[0]
-                    e.hours, e.approval_status, e.approved_by, e.approved_at = h, "draft", None, None
-                    e.save(update_fields=["hours", "approval_status", "approved_by", "approved_at"])
+                    if e.approval_status in ("pending", "client", "approved") and e.hours != h:
+                        e.approvals = list(e.approvals or []) + [{"by": user.display_name, "byId": user.pk, "at": timezone.now().isoformat(),
+                                                                  "step": "Modifiée après envoi", "decision": "reopened"}]
+                    elif e.approval_status in ("pending", "client", "approved"):
+                        continue  # même valeur : rien ne change
+                    e.hours, e.approval_status, e.approved_by, e.approved_at, e.approval_step = h, "draft", None, None, 0
+                    e.save(update_fields=["hours", "approval_status", "approved_by", "approved_at", "approval_step", "approvals"])
                 else:
                     TimeEntry.objects.create(tenant=user.tenant, person=user, project=project, work_date=day, hours=h,
                                              line=line, approval_status="draft")
@@ -326,6 +378,7 @@ class TimeSheetView(APIView):
                 if a.get("kind") not in kinds:
                     raise ApiError("VALIDATION_ERROR", "Type d'absence inconnu.")
                 day = date.fromisoformat(str(a.get("date")))
+                touched.append(day)
                 h = hours_of(a.get("amount"))
                 row = TimeAbsence.objects.select_for_update().filter(person=user, work_date=day, kind=a["kind"]).first()
                 if row and row.status == "submitted":
@@ -339,6 +392,7 @@ class TimeSheetView(APIView):
                     row.save(update_fields=["hours"])
                 else:
                     TimeAbsence.objects.create(tenant=user.tenant, person=user, work_date=day, kind=a["kind"], hours=h)
+            check_day_limit(user, touched, hpd, unit)  # annule tout l'enregistrement si un jour dépasse
         start, end = _range(request)
         return Response(_sheet(user, start, end))
 
@@ -351,25 +405,44 @@ class TimeSheetSubmitView(APIView):
         _guard(user)
         start, end = _range(request)
         sheet = _sheet(user, start, end)
-        if sheet["incomplete"]:
-            raise ApiError("VALIDATION_ERROR", f"{len(sheet['incomplete'])} jour(s) ouvré(s) incomplet(s) : complétez présence et absences avant l'envoi.")
+        if sheet["rejectedLeft"]:
+            raise ApiError("VALIDATION_ERROR", f"{sheet['rejectedLeft']} saisie(s) refusée(s) à corriger avant de renvoyer la période.")
         auto = time_approval.approval_mode(user.tenant) == "auto"
         now = timezone.now()
+        unit, hpd = _settings(user.tenant)
+        gap_days = 0
         with transaction.atomic():
-            qs = TimeEntry.objects.select_for_update().filter(person=user, work_date__range=(start, end), approval_status__in=("draft", "rejected"))
+            # Temps non saisi sur un jour ouvré : déclaré automatiquement en absence (« Autre absence »).
+            for d in sheet["incomplete"]:
+                day = date.fromisoformat(d)
+                done = sum((e.hours for e in TimeEntry.objects.filter(person=user, work_date=day).exclude(approval_status="rejected")), Decimal("0"))
+                done += sum((a.hours for a in TimeAbsence.objects.filter(person=user, work_date=day)), Decimal("0"))
+                gap = hpd - done
+                if gap <= 0:
+                    continue
+                row, created = TimeAbsence.objects.get_or_create(person=user, work_date=day, kind="other",
+                                                                 defaults={"tenant": user.tenant, "hours": gap, "status": "draft"})
+                if not created:
+                    row.hours += gap
+                    row.status = "draft"
+                    row.save(update_fields=["hours", "status"])
+                gap_days += 1
+            qs = TimeEntry.objects.select_for_update().filter(person=user, work_date__range=(start, end), approval_status="draft")
             n = 0
             for e in qs:
                 e.approval_status = time_approval.after_internal_approval(user.tenant) if auto else "pending"
                 e.approved_at = now if auto else None
                 e.approval_step = 0
-                e.save(update_fields=["approval_status", "approved_at", "approval_step"])  # déclenche budget et CRA
+                e.reject_reason = ""
+                e.save(update_fields=["approval_status", "approved_at", "approval_step", "reject_reason"])  # déclenche budget et CRA
                 n += 1
             a = TimeAbsence.objects.filter(person=user, work_date__range=(start, end), status="draft").update(status="submitted")
-        audit.record(user, "Feuille de temps", "Période envoyée en validation", "", f"{start} → {end} : {n} saisie(s), {a} absence(s)", tenant=user.tenant)
+        audit.record(user, "Feuille de temps", "Période envoyée en validation", "",
+                     f"{start} → {end} : {n} saisie(s), {a} absence(s) dont {gap_days} jour(s) complété(s) automatiquement", tenant=user.tenant)
         if not auto and n:
             _notify_validators(user, start, end)
         out = _sheet(user, start, end)
-        out["sent"] = {"entries": n, "absences": a, "auto": auto}
+        out["sent"] = {"entries": n, "absences": a, "auto": auto, "gapDays": gap_days}
         return Response(out)
 
 

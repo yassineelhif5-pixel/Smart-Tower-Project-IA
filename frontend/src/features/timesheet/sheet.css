@@ -81,3 +81,49 @@
 .eh .eh-detail>td{background:color-mix(in srgb,var(--line) 25%,transparent);padding:6px 12px}
 .eh .ts-chip{margin-right:4px}
 .ts-chip.draft{background:var(--accent-soft);color:var(--accent)}
+
+.sh-pipe{display:flex;flex-direction:column;gap:4px}
+.sh-pipe-steps{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.sh-step{font-size:11.5px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.sh-step.done{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.sh-step.current{background:var(--warn-soft);color:var(--warn);border-color:var(--warn);font-weight:700}
+.sh-step+.sh-step::before{content:"";}
+
+.sh-rejected{border:1px solid var(--crit);background:var(--crit-soft);color:var(--crit);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:3px;font-size:13px}
+.sh-rejected small{color:inherit;opacity:.85}
+
+.sh-cra{font-size:12.5px;background:var(--ok-soft);border-radius:8px;padding:6px 9px}
+.sh-tl{list-style:none;margin:0;padding:0 0 0 10px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.sh-tl li{display:flex;gap:10px;font-size:12.5px;position:relative}
+.sh-tl li::before{content:"";position:absolute;left:-15px;top:5px;width:8px;height:8px;border-radius:50%;background:var(--line-2)}
+.sh-tl li.sh-tl-validation::before{background:var(--ok)}.sh-tl li.sh-tl-refus::before{background:var(--crit)}
+.sh-tl li.sh-tl-envoi::before{background:var(--accent)}.sh-tl li.sh-tl-cra::before{background:var(--warn)}
+.sh-tl time{color:var(--muted);min-width:96px;font-variant-numeric:tabular-nums}
+
+.sh-in.sent.pending,.sh-in.sent.client{background:var(--warn-soft);color:var(--warn)}
+.sh-in.sent.approved{background:var(--ok-soft);color:var(--ok)}
+
+/* Tableau de validation (chef de projet / client) */
+.vb { display: flex; flex-direction: column; gap: 10px; }
+.vb-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vb-bar .inp { width: auto; min-width: 150px; }
+.vb-sp { flex: 1; }
+.vb-seg { display: inline-flex; border: 1px solid var(--line, #e2e8f0); border-radius: 8px; overflow: hidden; }
+.vb-seg button { border: 0; background: transparent; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+.vb-seg button.on { background: var(--accent, #4f46e5); color: #fff; }
+.vb-check { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.vb-synth tr.vb-proj td { background: var(--surface-2, #f8fafc); }
+.vb-synth tr.vb-total td { border-top: 2px solid var(--line, #cbd5e1); }
+.vb-group { border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 8px 10px; }
+.vb-group-h { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.vb-group-h > div:first-child { flex: 1; min-width: 200px; }
+.vb-h { font-variant-numeric: tabular-nums; }
+
+/* Arborescence des CRA */
+.cra-tree, .cra-tree ul { list-style: none; margin: 0; padding-left: 0; }
+.cra-tree ul { padding-left: 22px; border-left: 1px dashed var(--line, #cbd5e1); margin-left: 8px; }
+.cra-node { background: none; border: 0; padding: 4px 2px; cursor: pointer; font: inherit; text-align: left; }
+.cra-leaf { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 4px 0; }
+.cra-leaf > span:first-child { font-weight: 500; }
+
+.inv-cra { margin: 0 0 8px 18px; padding: 2px 0 2px 10px; border-left: 3px solid #c7d2fe; }

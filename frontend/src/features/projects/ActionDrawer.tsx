@@ -8,8 +8,9 @@ type Person = { id: number; name: string };
 type DepRef = { id: string; title: string; status: string; statusLabel: string; due: string | null; project: string; projectName: string | null };
 export type DrawerTask = {
   id: string; title: string; status: string; statusLabel: string; owner: Person | null; due: string | null; startDate: string | null;
-  prio: string; phase: string; est: string | null; dependsOn?: DepRef[]; successors?: DepRef[]; blockedBy?: number; depConflict?: boolean;
+  prio: string; phase: string; est: string | null; spent?: string | null; raf?: string | null; doneAt?: string | null; dependsOn?: DepRef[]; successors?: DepRef[]; blockedBy?: number; depConflict?: boolean;
   instance?: { id: number; name: string } | null;
+  type?: string; ticket?: string; extOwner?: string; incidentDate?: string | null;
 };
 type Ctx = {
   id: string; team: Person[]; statuses: { code: string; label: string }[]; phases: string[];
@@ -20,14 +21,16 @@ type Comment = { id: number; author: string; authorId: number | null; at: string
 const fr = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString("fr-FR") : "—");
 
 /** Panneau latéral d'une action : modification directe (enregistrement automatique), dépendances, commentaires avec @mentions, discussion. */
-export function ActionDrawer<W extends Ctx>({ p, taskId, canEdit, onChanged, onClose, onDiscuss, onAlert, onDelete }: {
-  p: W; taskId: string; canEdit: boolean; onChanged: (w: W) => void; onClose: () => void;
+export function ActionDrawer<W extends Ctx>({ p, taskId, canEdit, meId, onChanged, onClose, onDiscuss, onAlert, onDelete }: {
+  p: W; taskId: string; canEdit: boolean; meId?: number; onChanged: (w: W) => void; onClose: () => void;
   onDiscuss: (t: DrawerTask) => void; onAlert: (t: DrawerTask) => void; onDelete: (t: DrawerTask) => void;
 }) {
   const toast = useToast();
   const t = p.tasks.find((x) => x.id === taskId);
   const [title, setTitle] = useState(t?.title ?? "");
   const [saving, setSaving] = useState(false);
+  const [pen, setPen] = useState(false);
+  const [f, setF] = useState({ startDate: "", est: "", spent: "", status: "", doneAt: "" });
   const [tab, setTab] = useState<"comments" | "history">("comments");
   const [comments, setComments] = useState<Comment[] | null>(null);
   const [history, setHistory] = useState<{ at: string; text: string }[]>([]);
@@ -57,6 +60,26 @@ export function ActionDrawer<W extends Ctx>({ p, taskId, canEdit, onChanged, onC
     return () => window.clearTimeout(h);
   }, [dq, taskId]);
 
+  const savePen = async () => {
+    if (!t) return;
+    if (f.status === "done" && (!(Number(f.spent) > 0) || !f.doneAt)) {
+      toast("Pour terminer l’action, saisissez le temps réellement passé et la date de réalisation.", true);
+      return;
+    }
+    const body: Record<string, unknown> = { startDate: f.startDate || null, est: f.est === "" ? 0 : Number(f.est), spent: f.spent === "" ? 0 : Number(f.spent), status: f.status };
+    if (f.status === "done") body.doneAt = f.doneAt;
+    setSaving(true);
+    try {
+      const w = canEdit ? await api.patch<W>(url, body) : await api.post<W>(`${url}/me`, { op: "edit", ...body });
+      onChanged(w);
+      setPen(false);
+      toast("Action mise à jour");
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Enregistrement impossible", true);
+    } finally {
+      setSaving(false);
+    }
+  };
   const save = async (patch: Record<string, unknown>, msg?: string) => {
     setSaving(true);
     try {
@@ -114,6 +137,10 @@ export function ActionDrawer<W extends Ctx>({ p, taskId, canEdit, onChanged, onC
             {saving ? <span className="ad-saving">Enregistrement…</span> : <span className="ad-saved">✓ Enregistré automatiquement</span>}
           </div>
           <div className="ad-hr">
+            {(canEdit || (meId != null && t.owner?.id === meId)) && (
+              <button className={`btn sm ${pen ? "primary" : "ghost"}`} type="button" title="Modifier début, estimation, temps passé et statut"
+                onClick={() => { setF({ startDate: t.startDate ?? "", est: t.est ? String(Number(t.est)) : "", spent: t.spent ? String(Number(t.spent)) : "", status: t.status, doneAt: t.doneAt ?? new Date().toISOString().slice(0, 10) }); setPen(!pen); }}>✏️ Modifier</button>
+            )}
             <button className="btn ghost sm" type="button" onClick={() => onDiscuss(t)}>💬 Discussion</button>
             <button className="btn ghost sm" type="button" onClick={() => onAlert(t)}>🚨 Alerte</button>
             {canEdit && <button className="btn ghost sm pj-del" type="button" title="Supprimer" onClick={() => onDelete(t)}>🗑</button>}
@@ -128,13 +155,40 @@ export function ActionDrawer<W extends Ctx>({ p, taskId, canEdit, onChanged, onC
           ) : (
             <h2 className="ad-title ro">{t.title}</h2>
           )}
+          {pen && (
+            <form className="ad-pen" onSubmit={(e) => { e.preventDefault(); void savePen(); }}>
+              <label>Date de début<input className="inp" type="date" value={f.startDate} onChange={(e) => setF({ ...f, startDate: e.target.value })} /></label>
+              <label>Estimation (h)<input className="inp num" type="number" min={0} step={0.5} value={f.est} onChange={(e) => setF({ ...f, est: e.target.value })} /></label>
+              <label>Temps passé (h){f.status === "done" ? " *" : ""}<input className={`inp num${f.status === "done" && !(Number(f.spent) > 0) ? " ad-late" : ""}`} type="number" min={0} step={0.25} value={f.spent} onChange={(e) => setF({ ...f, spent: e.target.value })} /></label>
+              <label>Statut
+                <select className={`ta-status st-${f.status}`} value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>
+                  {p.statuses.map((x) => <option key={x.code} value={x.code}>{x.label}</option>)}
+                </select>
+              </label>
+              {f.status === "done" && <label>Réalisée le<input className="inp" type="date" max={new Date().toISOString().slice(0, 10)} value={f.doneAt} onChange={(e) => setF({ ...f, doneAt: e.target.value })} /></label>}
+              {f.est && f.spent && <small className={Number(f.spent) > Number(f.est) ? "ad-over" : "faint"}>{Number(f.spent) > Number(f.est) ? `⚠️ Dépassement de ${Number(f.spent) - Number(f.est)} h` : `Reste estimé : ${Number(f.est) - Number(f.spent)} h`}</small>}
+              <div className="ad-pen-btns">
+                <button className="btn sm" type="button" onClick={() => setPen(false)}>Annuler</button>
+                <button className="btn primary sm" type="submit" disabled={saving}>Enregistrer</button>
+              </div>
+            </form>
+          )}
+          {t.type === "infra" && (
+            <div className="ad-flag warn">🛠 Tâche infra / autre équipe{t.ticket ? ` · ticket #${t.ticket}` : ""}{t.extOwner ? ` · en charge : ${t.extOwner}` : ""}{t.incidentDate ? ` · incident / demande du ${fr(t.incidentDate)}` : ""}</div>
+          )}
           {late && <div className="ad-flag crit">⏰ En retard depuis le {fr(t.due)}</div>}
           {(t.blockedBy ?? 0) > 0 && <div className="ad-flag warn">🔗 En attente de {t.blockedBy} action(s) prérequise(s)</div>}
           {t.depConflict && <div className="ad-flag crit">⚠️ Conflit de dates avec une action prérequise</div>}
 
           <div className="ad-grid">
             <label>Statut
-              <select className={`ta-status st-${t.status}`} disabled={!canEdit} value={t.status} onChange={(e) => save({ status: e.target.value })}>
+              <select className={`ta-status st-${t.status}`} disabled={!canEdit} value={t.status} onChange={(e) => {
+                if (e.target.value === "done") {
+                  setF({ startDate: t.startDate ?? "", est: t.est ? String(Number(t.est)) : "", spent: t.spent && Number(t.spent) ? String(Number(t.spent)) : "", status: "done", doneAt: new Date().toISOString().slice(0, 10) });
+                  setPen(true);
+                  toast("Indiquez le temps réellement passé et la date de réalisation, puis enregistrez.");
+                } else void save({ status: e.target.value });
+              }}>
                 {p.statuses.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
               </select>
             </label>

@@ -79,6 +79,10 @@ class User(AbstractUser):
     client = models.ForeignKey("projects.Client", on_delete=models.PROTECT, null=True, blank=True, related_name="users")
     must_change_password = models.BooleanField(default=False)
     auth_mode = models.CharField(max_length=10, choices=AUTH_MODES, default="both")
+    # Facturation : société de rattachement (ex. société d'un consultant externe), statut externe et TJM par défaut.
+    company = models.CharField(max_length=120, blank=True, help_text="Société de rattachement (ex. société du consultant externe)")
+    external = models.BooleanField(default=False, help_text="Intervenant externe rattaché à une société")
+    daily_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="TJM HT par défaut de la personne")
 
     @property
     def is_app_admin(self):

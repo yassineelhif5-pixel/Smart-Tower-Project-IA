@@ -4,7 +4,9 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from accounts import password_reset, tenant_switch
 from projects import ai_orchestrator, assistant, assistant_questions, excel_import, export_xlsx, mail_report, meeting_minutes, migration_view, planning_view, project_alerts, team_docs, team_structure, workspace
 from accounts import views as auth
-from projects import ai_usage, budget_report, time_workflow_view, timesheet_history, timesheet_sheet
+from projects import excel_access
+from configuration import notif_admin
+from projects import ai_usage, budget_report, notif_jobs, time_workflow_view, timesheet_history, timesheet_report, timesheet_sheet
 from aicalls import views as aicalls
 from collaboration import views as collab
 from configuration import views as conf
@@ -49,6 +51,9 @@ admin_patterns = [
     path("notifications/rules", conf.RulesView.as_view()),
     path("notifications/channels/<str:kind>", conf.ChannelView.as_view()),
     path("notifications/channels/<str:kind>/test", conf.ChannelTestView.as_view()),
+    path("notifications/deliveries", notif_admin.AdminDeliveriesView.as_view()),
+    path("whoami", notif_admin.AdminWhoAmIView.as_view()),
+    path("notifications/smtp-test", notif_admin.AdminSmtpTestView.as_view()),
     path("audit", conf.AuditView.as_view()),
     path("capabilities", conf.CapabilityMatrixView.as_view()),
     path("users/<int:pk>/capabilities", conf.UserCapabilityView.as_view()),
@@ -71,6 +76,13 @@ licensing_patterns = [
 
 # Espace Pilote (Super Admin Global) : entreprises, offres, licences, demandes, supervision.
 platform_patterns = [
+    path("notifications", notif_admin.PlatformNotificationsView.as_view()),
+    path("config", notif_admin.PlatformConfigView.as_view()),
+    path("config/smtp", notif_admin.PlatformSmtpView.as_view()),
+    path("notifications/test", notif_admin.PlatformTestView.as_view()),
+    path("tenants/<int:tenant_id>/notifications", notif_admin.PilotTenantNotificationsView.as_view()),
+    path("tenants/<int:tenant_id>/notifications/email", notif_admin.PilotTenantEmailView.as_view()),
+    path("tenants/<int:tenant_id>/notifications/test", notif_admin.PilotTenantTestView.as_view()),
     path("saas-report", conf.SupportSaaSReportView.as_view()),
     path("support/tenants", conf.SupportTenantListView.as_view()),
     path("tenants/<int:pk>/access-rights", conf.PlatformTenantRightsView.as_view()),
@@ -156,6 +168,8 @@ api_patterns = [
     path("assistant/me", assistant.AssistantMeView.as_view()),
     path("assistant/projects", assistant.AssistantProjectsView.as_view()),
     path("imports/excel", excel_import.ExcelImportView.as_view()),
+    path("imports/excel/profiles", excel_access.ExcelImportProfilesView.as_view()),
+    path("platform/tenants/<int:tenant_id>/excel-import", excel_access.PilotExcelImportView.as_view()),
     path("imports/excel/jobs", excel_import.ExcelImportJobsView.as_view()),
     path("projects/<str:pk>/team-structure", team_structure.TeamStructureView.as_view()),
     path("team-absences", team_structure.TeamAbsencesView.as_view()),
@@ -173,6 +187,8 @@ api_patterns = [
     path("projects/<str:pk>/documents/<str:doc_id>", workspace.ProjectDocumentDetailView.as_view()),
     path("projects/<str:pk>/tasks/<str:task_id>", workspace.ProjectTasksView.as_view()),
     path("projects/<str:pk>/tasks/<str:task_id>/comments", workspace.ActionCommentsView.as_view()),
+    path("projects/<str:pk>/tasks-reassign", workspace.ReassignTasksView.as_view()),
+    path("projects/<str:pk>/tasks/<str:task_id>/me", workspace.MyTaskView.as_view()),
     path("timesheets", projects.TimeEntryListView.as_view()),
     path("ai-usage", ai_usage.AiUsageView.as_view()),
     path("ai-usage/invoice", ai_usage.AiUsageInvoiceView.as_view()),
@@ -180,6 +196,12 @@ api_patterns = [
     path("timesheets/workflows", time_workflow_view.TimeWorkflowView.as_view()),
     path("platform/tenants/<int:tenant_id>/time-workflows", time_workflow_view.PilotTimeWorkflowView.as_view()),
     path("timesheets/history", timesheet_history.TimesheetHistoryView.as_view()),
+    path("projects/<str:pk>/weekly-recap", notif_jobs.WeeklyRecapView.as_view()),
+    path("projects/<str:pk>/weekly-recap/send", notif_jobs.WeeklyRecapSendView.as_view()),
+    path("timesheets/report", timesheet_report.TimesheetReportView.as_view()),
+    path("timesheets/my-cras", timesheet_report.MyCrasView.as_view()),
+    path("timesheets/my-cras/<str:doc_id>/regenerate", timesheet_report.RegenerateCraView.as_view()),
+    path("timesheets/report/generate-cra", timesheet_report.GenerateMyCraView.as_view()),
     path("timesheets/history/cra/<str:doc_id>", timesheet_history.TimesheetCraView.as_view()),
     path("timesheets/history-settings", timesheet_history.HistorySettingsView.as_view()),
     path("platform/tenants/<int:tenant_id>/timesheet-history-settings", timesheet_history.PilotHistorySettingsView.as_view()),

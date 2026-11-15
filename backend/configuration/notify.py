@@ -45,8 +45,17 @@ def send_email(channel, to, subject, body):
             timeout=10,
         )
         EmailMessage(subject, body, conf.get("from_address"), to, connection=connection).send()
+        from .mailer import log
+        for r in to:
+            log(channel.tenant_id, "", "email", r, subject, "sent", "", "tenant")
     except Exception as exc:
         logger.warning("Envoi SMTP impossible : %s", type(exc).__name__)
+        try:
+            from .mailer import log
+            for r in to:
+                log(channel.tenant_id, "", "email", r, subject, "failed", type(exc).__name__, "tenant")
+        except Exception:  # noqa: BLE001
+            pass
         raise ChannelError(f"Envoi SMTP impossible ({type(exc).__name__}). Vérifiez le serveur, le port et les identifiants.") from exc
 
 

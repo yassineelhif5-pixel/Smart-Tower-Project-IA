@@ -152,3 +152,7 @@ Depuis le lot 2b, **Django est le seul propriétaire du schéma** : toutes les t
 - `seed.sql` : les données de démonstration, lues par `python manage.py load_demo`. Fichier généré : ne le modifiez pas à la main.
 - `generate_seed.py` : régénère `seed.sql` depuis `index.html` (`python3 supabase/generate_seed.py`, nécessite Playwright).
 - `verify_django_equivalence.py` : contrôle ponctuel que les règles de lecture Django donnent les mêmes lignes que les RLS (mode d'emploi en tête du fichier).
+
+---
+
+© ZirconAI — Project Control Tower a été conçu et édité par [ZirconAI](https://zirconai.fr/). Tous droits réservés.

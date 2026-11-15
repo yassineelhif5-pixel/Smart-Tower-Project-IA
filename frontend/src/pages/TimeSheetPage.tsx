@@ -1,37 +1,44 @@
+import { useState } from "react";
 import { timeApi } from "../api/endpoints";
 import { useApi } from "../api/useApi";
 import { Card, ErrorNotice, Loading, PageHead, useAction, useToast } from "../components/ui";
 import { DelegationsCard } from "../features/timesheet/DelegationsCard";
 import { MySheet } from "../features/timesheet/MySheet";
 import { EntryHistory } from "../features/timesheet/EntryHistory";
+import { ValidationBoard } from "../features/timesheet/ValidationBoard";
+import { TimesheetReport } from "../features/timesheet/TimesheetReport";
+import { MyCras } from "../features/timesheet/MyCras";
+import "../features/timesheet/sheet.css";
 import type { Me } from "../types/api";
 
 
-function fmt(n: number) {
-  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0$/, "").replace(".", ",");
-}
 
 export function TimeSheetPage({ me }: { me: Me }) {
   const rows = useApi(timeApi.entries);
   const { run, busy } = useAction();
   const toast = useToast();
+  const [showSent, setShowSent] = useState(false);
   const canSubmit = !!me.permissions.timesheet?.[1] && me.role?.code !== "client";
   const canApprove = !!me.permissions.timesheet?.[4];
 
   if (rows.error) return <ErrorNotice error={rows.error} onRetry={rows.reload} />;
   if (!rows.data) return <Loading />;
 
-  const decide = (id: number, decision: "approved" | "rejected") =>
-    run(() => timeApi.decide(id, decision), decision === "approved" ? "Temps validé" : "Saisie refusée").then(
+  const runDecide = (id: number, decision: "approved" | "rejected", comment: string) =>
+    run(() => timeApi.decide(id, decision, comment), decision === "approved" ? "Temps validé" : "Saisie refusée : le collaborateur est prévenu").then(
       () => rows.reload(),
       () => undefined,
     );
   const toApprove = rows.data.rows.filter((r) => r.canDecide);
+  // Saisies en attente d'un autre valideur (visibles, non validables par moi)
+  const upstream = rows.data.rows.filter((r) => r.status === "pending" && !r.canDecide && r.user !== me.id && r.waitingFor);
+  // Saisies déjà validées en interne et transmises au client (suivi, lecture seule)
+  const atClient = showSent ? rows.data.rows.filter((r) => r.status === "client" && r.user !== me.id) : [];
   const autoMode = rows.data.approval === "auto";
-  const approveAll = async () => {
-    for (const r of toApprove) {
+  const approveMany = async (ids: number[]) => {
+    for (const id of ids) {
       try {
-        await run(() => timeApi.decide(r.id, "approved"));
+        await run(() => timeApi.decide(id, "approved"));
       } catch {
         /* le message d'erreur est déjà affiché */
       }
@@ -50,62 +57,31 @@ export function TimeSheetPage({ me }: { me: Me }) {
 
       {canSubmit && <MySheet />}
 
-      {(canApprove || toApprove.length > 0) && !autoMode && (
+      {(canApprove || toApprove.length > 0 || upstream.length > 0) && !autoMode && (
         <Card
           title="À valider"
-          sub="Saisies dont vous êtes le valideur (ou le remplaçant pendant une absence)."
-          extra={
-            toApprove.length > 1 ? (
-              <button className="btn primary sm" type="button" disabled={busy} onClick={approveAll}>
-                Tout valider ({toApprove.length})
-              </button>
-            ) : undefined
-          }
+          sub="Saisies dont vous êtes le valideur (ou le délégué). Affichez-les par consultant, projet ou période, consultez le détail et la synthèse des heures avant de valider."
         >
-          <div className="tbl-wrap">
-            <table className="tbl tight">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Personne</th>
-                  <th>Projet</th>
-                  <th className="r">Durée</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {toApprove.map((r) => (
-                  <tr key={r.id}>
-                    <td>{new Date(`${r.workDate}T00:00:00`).toLocaleDateString("fr-FR")}</td>
-                    <td>{r.userName}</td>
-                    <td>{r.projectName}</td>
-                    <td className="r">
-                      {fmt(Number(r.amount))} {r.unit === "day" ? "j" : "h"}
-                    </td>
-                    <td>
-                      <div className="btns">
-                        <button className="btn primary sm" disabled={busy} onClick={() => decide(r.id, "approved")}>
-                          Valider
-                        </button>
-                        <button className="btn sm" disabled={busy} onClick={() => decide(r.id, "rejected")}>
-                          Refuser
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {toApprove.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="muted">
-                      Rien à valider pour le moment.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ValidationBoard
+            busy={busy}
+            entries={[...toApprove, ...upstream, ...atClient].map((r) => r.status === "client" ? ({ id: r.id, date: r.workDate, person: r.userName, personId: r.user,
+              project: r.projectCode ?? r.projectName, projectName: r.projectName, line: r.lineName ?? "", task: r.actionName || "Activité générale",
+              hours: Number(r.hours ?? r.amount), readOnly: true, step: "✅ Validée en interne — en attente du client", approvedBy: r.approvedBy ?? undefined,
+              locked: "Déjà validée en interne : en attente de la validation du client" }) : ({ id: r.id, date: r.workDate, person: r.userName, personId: r.user, project: r.projectCode ?? r.projectName,
+              projectName: r.projectName, line: r.lineName ?? "", task: r.actionName || "Activité générale",
+              hours: Number(r.hours ?? (r.unit === "day" ? NaN : r.amount)),
+              step: r.canDecide ? (r.early ? `⚡ Validation anticipée — en attente de ${r.waitingFor}` : r.stepLabel) : `En attente de ${r.waitingFor}`,
+              readOnly: !r.canDecide, locked: r.canDecide ? undefined : `En attente de ${r.waitingFor} (vous n'êtes pas le valideur de cette étape)` }))}
+            toolbar={<label className="vb-check"><input type="checkbox" checked={showSent} onChange={(e) => setShowSent(e.target.checked)} /> Inclure les saisies transmises au client</label>}
+            onApprove={(ids) => approveMany(ids)}
+            onReject={(id, comment) => runDecide(id, "rejected", comment)}
+          />
         </Card>
       )}
+
+      {canSubmit && <MyCras />}
+
+      <TimesheetReport />
 
       {canSubmit && <DelegationsCard me={me} />}
 

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { SmtpTestPanel } from "../notifications/SmtpTestPanel";
+import { AdminDeliveries } from "../notifications/AdminDeliveries";
 
 import { ApiError } from "../../api/client";
 import { adminApi } from "../../api/endpoints";
@@ -21,11 +23,15 @@ export function NotificationsTab({ adminEmail }: { adminEmail: string }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <AdminDeliveries />
       <div className="grid g2">
         {data.channels.map((c) => (
           <ChannelCard key={c.kind} channel={c} adminEmail={adminEmail} onSaved={(next) => state.setData(next)} />
         ))}
       </div>
+      <Card title="Configuration SMTP — test et journal" sub="Vérifiez la connexion au serveur SMTP : chaque test est enregistré avec son résultat (OK / KO) et l'erreur exacte renvoyée par le serveur.">
+        <SmtpTestPanel postUrl="/admin/notifications/smtp-test" getUrl="/admin/notifications/smtp-test" />
+      </Card>
       <Card
         title="Règles d'envoi"
         sub="Pour chaque événement, les canaux qui le diffusent. Un canal désactivé n'envoie rien, même si la case est cochée."
@@ -86,6 +92,7 @@ function ChannelCard({
     ...channel.settings,
   });
   const [to, setTo] = useState(adminEmail);
+  const [secret, setSecret] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const { run, busy } = useAction();
   const set = (k: string, v: string | number) => setSettings((s) => ({ ...s, [k]: v }));
@@ -93,11 +100,12 @@ function ChannelCard({
   async function save(enabled: boolean) {
     setErrors({});
     try {
+      if (secret.trim() && channel.secret) await adminApi.setSecret(channel.secret.key, secret.trim());
       const next = await run(
         () => adminApi.setChannel(channel.kind, enabled, channel.kind === "email" ? settings : {}),
-        "Canal enregistré",
+        secret.trim() ? (channel.kind === "email" ? "Canal et clé SMTP enregistrés" : "Webhook enregistré") : "Canal enregistré",
       );
-      if (next) onSaved(next);
+      if (next) { setSecret(""); onSaved(next); }
     } catch (e) {
       if (e instanceof ApiError) setErrors({ ...e.fieldErrors(), form: e.message });
     }
@@ -111,11 +119,16 @@ function ChannelCard({
   }
 
   const secretLine = channel.secret && (
-    <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
-      {channel.kind === "email" ? "Mot de passe SMTP" : "URL du webhook"} :{" "}
-      {channel.secret.isSet ? <Pill tone="ok">défini</Pill> : <Pill tone="">non défini</Pill>} — à saisir dans API →
-      Clés de services externes.
-    </p>
+    <Field id={`secret_${channel.kind}`} label={channel.kind === "email" ? "Clé SMTP (mot de passe)" : "URL du webhook"}
+      hint={channel.secret.isSet ? "Définie — laissez vide pour la conserver, ou saisissez une nouvelle valeur pour la remplacer. Stockée chiffrée."
+        : "Non définie — saisissez-la puis enregistrez. Stockée chiffrée, jamais réaffichée."}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input id={`secret_${channel.kind}`} className="inp" type={channel.kind === "email" ? "password" : "url"} autoComplete="new-password"
+          value={secret} onChange={(e) => setSecret(e.target.value)}
+          placeholder={channel.secret.isSet ? "•••••••• (définie)" : channel.kind === "email" ? "clé SMTP / mot de passe" : "https://…"} />
+        {channel.secret.isSet ? <Pill tone="ok">définie</Pill> : <Pill tone="">non définie</Pill>}
+      </div>
+    </Field>
   );
 
   return (
@@ -215,6 +228,7 @@ function ChannelCard({
           <>
             {secretLine}
             <div className="btns">
+              {secret.trim() && <button className="btn primary" onClick={() => save(channel.enabled)} disabled={busy}>Enregistrer l'URL</button>}
               <button className="btn" onClick={test} disabled={busy || !channel.secret?.isSet}>
                 Envoyer un test
               </button>

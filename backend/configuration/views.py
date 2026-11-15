@@ -1003,8 +1003,18 @@ def notifications_state(tenant):
             "secret": ({"key": CHANNEL_SECRET[kind], "isSet": CHANNEL_SECRET[kind] in secrets_set} if kind in CHANNEL_SECRET else None),
         } for kind, label in CHANNELS],
         "events": [{"code": c, "label": l} for c, l in EVENTS],
-        "rules": {code: {kind: rules.get(code, {}).get(kind, False) for kind, _ in CHANNELS} for code, _ in EVENTS},
+        # Sans règle enregistrée : valeur par défaut du socle (application oui ; e-mail pour les événements importants).
+        "rules": {code: {kind: rules.get(code, {}).get(kind, _rule_default(code, kind)) for kind, _ in CHANNELS} for code, _ in EVENTS},
     }
+
+
+def _rule_default(event, kind):
+    from .mailer import DEFAULT_EMAIL_EVENTS, SOCLE_EVENTS
+    if kind == "email":
+        return event in DEFAULT_EMAIL_EVENTS
+    if kind == "inapp":
+        return event in SOCLE_EVENTS
+    return False
 
 
 class NotificationSettingsView(AdminView):
@@ -1227,5 +1237,6 @@ class CronMaintenanceView(APIView):
         call_command("sync_teams", stdout=out)
         call_command("process_methodology", stdout=out)
         call_command("remind_timesheets", stdout=out)
+        call_command("send_notifications", stdout=out)
         call_command("generate_cra", stdout=out)
         return Response({"done": True, "report": out.getvalue().strip().splitlines()})

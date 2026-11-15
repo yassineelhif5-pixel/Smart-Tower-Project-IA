@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { WeeklyRecapCard } from "../features/notifications/WeeklyRecapCard";
 import { Fragment, useEffect, useState } from "react";
 
 import { api, API_BASE, ApiError } from "../api/client";
@@ -8,6 +9,7 @@ import { AlertButton, AlertDialog, UserAlertsStrip } from "../features/projects/
 import { OrchestratorPage } from "../features/orchestrator/OrchestratorPage";
 import { AiCallPage } from "../features/aicall/AiCallPage";
 import { ExcelImportCard } from "../features/import/ExcelImportWizard";
+import { MyTaskDialog, TaskBoard, useMyTask } from "../features/projects/MyTasks";
 import { PortfolioReporting, readCompare, writeCompare } from "../features/projects/PortfolioReporting";
 import { RequiredDocs } from "../features/projects/RequiredDocs";
 import { TeamWorkload } from "../features/projects/TeamWorkload";
@@ -34,6 +36,8 @@ type Task = {
   id: string; title: string; status: string; statusLabel: string; owner: Person | null;
   due: string | null; startDate: string | null; prio: string; phase: string; est: string | null;
   dependsOn?: DepRef[]; successors?: DepRef[]; blockedBy?: number; depConflict?: boolean; instance?: { id: number; name: string } | null;
+  doneAt?: string | null; spent?: string | null; type?: string; ticket?: string; extOwner?: string; incidentDate?: string | null; us?: { id: string; title: string; sprint: number | null } | null;
+  extension?: { due: string; reason: string; by: string; from: string | null } | null;
 };
 type ProjRef = { id: string; code: string; name: string; progress?: number; endDate?: string | null; startDate?: string | null };
 type Member = Person & { canEdit: boolean; isPm: boolean; isTl: boolean; openTasks: number; dailyRate?: string | null };
@@ -52,7 +56,7 @@ type Workspace = {
   description: string; startDate: string | null; endDate: string | null; progress: number;
   pm: Person | null; tl: Person | null;
   rights: {
-    isPm: boolean; isTl: boolean; canManageTeam: boolean; canManageTasks: boolean; canEditInfo: boolean;
+    isPm: boolean; isTl: boolean; canManageTeam: boolean; canManageTasks: boolean; canCreateTasks?: boolean; canEditInfo: boolean;
     canEditType: boolean; canSeeMoney: boolean; canManageDocs: boolean;
   };
   team: Member[]; tasks: Task[]; statuses: { code: string; label: string }[]; counts: Record<string, number>;
@@ -180,7 +184,7 @@ function ProjectList({ me }: { me: Me }) {
     <div className="page">
       <PageHead eyebrow={me.tenant?.name ?? ""} title="Mes projets" sub="Les projets qui vous sont affectés. Ouvrez un projet pour gérer son équipe et ses tâches."
         right={<div className="btns"><a className="btn" href="#projets/charge">👥 Charge équipe</a><a className="btn" href="#projets/reporting">📊 Reporting projets</a></div>} />
-      {(me.permissions.project?.[1] || me.permissions.action?.[1] || me.isAdmin) && <ExcelImportCard />}
+      {me.excelImportEnabled && <ExcelImportCard />}
       {!list.data ? (
         <Loading />
       ) : list.data.length === 0 ? (
@@ -393,10 +397,11 @@ function ProjectDetail({ me, id, sub }: { me: Me; id: string; sub: string }) {
         ))}
       </div>
       {tab === "team" && <TeamTab me={me} p={p} onChange={set} />}
-      {tab === "tasks" && <TasksTab p={p} onChange={set} />}
+      {tab === "tasks" && <TasksTab p={p} me={me} onChange={set} />}
       {tab === "docs" && <DocsTab p={p} />}
       {tab === "budget" && p.rights.canSeeMoney && <BudgetTab p={p} onChange={set} />}
       {tab === "info" && <InfoTab p={p} onChange={set} />}
+      {tab === "info" && <WeeklyRecapCard projectId={p.id} />}
       {tab === "migration" && p.projectType === "migration" && <MigrationTab projectId={p.id} tasks={p.tasks} onTasksChanged={ws.reload} />}
     </div>
   );
@@ -414,6 +419,8 @@ function TeamTab({ me, p, onChange }: { me: Me; p: Workspace; onChange: (w?: Wor
     }, () => undefined);
   const remove = (m: Member) =>
     run(() => projectsApi.removeMember(p.id, m.id), `${m.name} retiré(e) du projet`).then(onChange, () => undefined);
+  const [replace, setReplace] = useState<Member | null>(null);
+  const canReplace = p.rights.isPm || p.rights.isTl || me.isAdmin;
   const toggleEdit = (m: Member) =>
     run(() => projectsApi.addMember(p.id, m.id, !m.canEdit), "Accès mis à jour").then(onChange, () => undefined);
 
@@ -476,7 +483,9 @@ function TeamTab({ me, p, onChange }: { me: Me; p: Workspace; onChange: (w?: Wor
                     {m.isTl && <span className="pill info nodot">Tech Lead</span>}
                     {!m.isPm && !m.isTl && <span className="faint">Membre</span>}
                   </td>
-                  <td className="r">{m.openTasks}</td>
+                  <td className="r">{m.openTasks}{canReplace && m.openTasks > 0 && (
+                    <button className="btn ghost sm" type="button" style={{ marginLeft: 6 }} title="Confier ses actions à un remplaçant (absence)" onClick={() => setReplace(m)}>🔁 Remplacer</button>
+                  )}</td>
                   {p.rights.canSeeMoney && (
                     <td className="r">
                       <input
@@ -520,19 +529,68 @@ function TeamTab({ me, p, onChange }: { me: Me; p: Workspace; onChange: (w?: Wor
           </table>
         </div>
       )}
+      {replace && <ReassignDialog p={p} from={replace} onClose={() => setReplace(null)} onDone={onChange} />}
     </Card>
   );
 }
 
-function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => void }) {
+/** Remplacement : le CP, le TL ou l'admin confie une, plusieurs ou toutes les actions ouvertes d'une personne à un remplaçant. */
+function ReassignDialog({ p, from, onClose, onDone }: { p: Workspace; from: Member; onClose: () => void; onDone: (w?: Workspace) => void }) {
+  const { run, busy } = useAction();
+  const open = p.tasks.filter((t) => t.owner?.id === from.id && t.status !== "done");
+  const [to, setTo] = useState("");
+  const [sel, setSel] = useState<string[]>(open.map((t) => t.id));
+  const go = () => run(() => api.post<Workspace & { moved: number }>(`/projects/${encodeURIComponent(p.id)}/tasks-reassign`, { from: from.id, to: Number(to), tasks: sel }),
+    `${sel.length} action(s) confiée(s) au remplaçant`).then((w) => { onDone(w); onClose(); }, () => undefined);
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="modal" role="dialog" aria-label="Confier les actions à un remplaçant" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="modal-h"><h3>🔁 Remplacer {from.name}</h3><button className="icon-btn" type="button" aria-label="Fermer" onClick={onClose}>✕</button></div>
+        <div className="modal-b" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {open.length === 0 ? <p className="muted">{from.name} n’a aucune action ouverte sur ce projet.</p> : (<>
+            <label>Remplaçant
+              <select className="inp" value={to} onChange={(e) => setTo(e.target.value)}>
+                <option value="">Choisir un membre de l’équipe…</option>
+                {p.team.filter((m) => m.id !== from.id).map((m) => <option key={m.id} value={m.id}>{m.name} — {m.openTasks} action(s) ouverte(s)</option>)}
+              </select>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
+              <input type="checkbox" checked={sel.length === open.length} onChange={(e) => setSel(e.target.checked ? open.map((t) => t.id) : [])} /> Toutes ses actions ouvertes ({open.length})
+            </label>
+            <div style={{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4, paddingLeft: 6 }}>
+              {open.map((t) => (
+                <label key={t.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                  <input type="checkbox" checked={sel.includes(t.id)} onChange={(e) => setSel(e.target.checked ? [...sel, t.id] : sel.filter((x) => x !== t.id))} />
+                  <span className="mono faint">{t.id}</span> {t.title}{t.due ? <small className="muted"> · {frDate(t.due)}</small> : null}
+                </label>
+              ))}
+            </div>
+            <small className="muted">Le remplaçant et {from.name} sont prévenus ; chaque action garde la trace du remplacement.</small>
+          </>)}
+        </div>
+        <div className="modal-f" style={{ display: "flex", gap: 8, justifyContent: "flex-end", padding: "12px 16px" }}>
+          <button className="btn" type="button" onClick={onClose}>Annuler</button>
+          <button className="btn primary" type="button" disabled={busy || !to || sel.length === 0} onClick={go}>Confier {sel.length} action(s)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TasksTab({ p, me, onChange }: { p: Workspace; me: Me; onChange: (w?: Workspace) => void }) {
   const { run, busy } = useAction();
   const edit = p.rights.canManageTasks;
+  const canCreate = edit || !!p.rights.canCreateTasks;
+  const my = useMyTask<Workspace>(p.id, onChange);
+  const [dialog, setDialog] = useState<{ task: Task; mode: "done" | "extend" } | null>(null);
+  const [layout, setLayoutState] = useState<"list" | "board">(() => { try { return localStorage.getItem("pct-tasks-layout") === "board" ? "board" : "list"; } catch { return "list"; } });
+  const setLayout = (l: "list" | "board") => { setLayoutState(l); try { localStorage.setItem("pct-tasks-layout", l); } catch { /* */ } };
   const today = new Date().toISOString().slice(0, 10);
   const isLate = (t: Task) => !!t.due && t.status !== "done" && t.due < today;
 
   // Filtres (barre compacte)
   const [q, setQ] = useState("");
-  const [view, setView] = useState<"open" | "late" | "unassigned" | "all">("open");
+  const [view, setView] = useState<"mine" | "open" | "late" | "unassigned" | "all">(() => (p.rights.canManageTasks ? "open" : "mine"));
   const [st, setSt] = useState("");
   const [stage, setStage] = useState("");
   const [inst, setInst] = useState("");
@@ -543,7 +601,7 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
   });
   const chooseGroup = (g: typeof group) => { setGroup(g); try { localStorage.setItem("pct-tasks-group", g); } catch { /* */ } };
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ title: "", owner: "", due: "", est: "", phase: "", instance: "" });
+  const [form, setForm] = useState({ title: "", owner: "", due: "", est: "", phase: "", instance: "", type: "", ticket: "", extOwner: "", incidentDate: "" });
   const [menu, setMenu] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [discuss, setDiscuss] = useState<Task | null>(null);
@@ -559,6 +617,7 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
 
   const stages = [...new Set([...p.phases, ...p.tasks.map((t) => t.phase).filter(Boolean)])];
   const counts = {
+    mine: p.tasks.filter((t) => t.owner?.id === me.id && t.status !== "done").length,
     open: p.tasks.filter((t) => t.status !== "done").length,
     late: p.tasks.filter(isLate).length,
     unassigned: p.tasks.filter((t) => !t.owner && t.status !== "done").length,
@@ -568,7 +627,7 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
   };
   const needle = q.trim().toLowerCase();
   const tasks = p.tasks
-    .filter((t) => (st ? t.status === st : view === "all" ? true : view === "late" ? isLate(t) : view === "unassigned" ? !t.owner && t.status !== "done" : t.status !== "done"))
+    .filter((t) => (st ? t.status === st : view === "mine" ? t.owner?.id === me.id && t.status !== "done" : view === "all" ? true : view === "late" ? isLate(t) : view === "unassigned" ? !t.owner && t.status !== "done" : t.status !== "done"))
     .filter((t) => (!stage ? true : stage === "__none" ? !t.phase : t.phase === stage))
     .filter((t) => (!inst ? true : inst === "__global" ? !t.instance : String(t.instance?.id) === inst))
     .filter((t) => (!owner ? true : owner === "__none" ? !t.owner : String(t.owner?.id) === owner))
@@ -602,9 +661,10 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
     run(() => projectsApi.addTask(p.id, {
       title: form.title, owner: form.owner ? Number(form.owner) : null, due: form.due, est: form.est || 0, phase: form.phase,
       ...(form.instance ? { instance: Number(form.instance) } : {}),
+      ...(form.type === "infra" ? { type: "infra", ticket: form.ticket, extOwner: form.extOwner, incidentDate: form.incidentDate || null } : {}),
     }), "Action créée").then((w) => {
       onChange(w);
-      setForm({ title: "", owner: "", due: "", est: "", phase: form.phase, instance: form.instance });
+      setForm({ title: "", owner: "", due: "", est: "", phase: form.phase, instance: form.instance, type: form.type, ticket: "", extOwner: "", incidentDate: "" });
     }, () => undefined);
   const patch = (t: Task, body: Record<string, unknown>) => run(() => projectsApi.updateTask(p.id, t.id, body)).then(onChange, () => undefined);
   const dueLabel = (t: Task) => {
@@ -622,12 +682,21 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
     <Card
       title="Actions"
       sub={`${counts.open} ouverte(s) · ${counts.done} terminée(s)${counts.late ? ` · ${counts.late} en retard` : ""}`}
-      extra={edit ? <button className="btn primary sm" type="button" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Nouvelle action"}</button> : undefined}
+      extra={canCreate ? <button className="btn primary sm" type="button" onClick={() => setAdding(!adding)}>{adding ? "Fermer" : "+ Nouvelle action"}</button> : undefined}
     >
-      {adding && edit && (
+      {adding && canCreate && (
         <div className="ta-add">
           <input className="inp ta-add-title" maxLength={300} autoFocus placeholder="Titre de l’action — Entrée pour créer" value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && form.title.trim()) add(); }} />
+          <select className="inp" aria-label="Type de tâche" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+            <option value="">Tâche projet</option>
+            <option value="infra">🛠 Infra / autre équipe</option>
+          </select>
+          {form.type === "infra" && (<>
+            <input className="inp" placeholder="N° de ticket" aria-label="Numéro de ticket" maxLength={60} value={form.ticket} onChange={(e) => setForm({ ...form, ticket: e.target.value })} />
+            <input className="inp" placeholder="Personne ou groupe en charge *" aria-label="Personne ou groupe en charge" maxLength={120} value={form.extOwner} onChange={(e) => setForm({ ...form, extOwner: e.target.value })} />
+            <input className="inp" type="date" title="Date de l’incident ou de la demande" aria-label="Date de l'incident ou de la demande" value={form.incidentDate} onChange={(e) => setForm({ ...form, incidentDate: e.target.value })} />
+          </>)}
           <select className="inp" aria-label="Responsable" value={form.owner} onChange={(e) => setForm({ ...form, owner: e.target.value })}>
             <option value="">Non affectée</option>
             {p.team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -646,17 +715,26 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
           )}
           <input className="inp" type="date" aria-label="Échéance" value={form.due} onChange={(e) => setForm({ ...form, due: e.target.value })} />
           <input className="inp num ta-est" type="number" min={0} step={0.5} placeholder="Charge (h)" aria-label="Charge" value={form.est} onChange={(e) => setForm({ ...form, est: e.target.value })} />
-          <button className="btn primary" type="button" disabled={busy || !form.title.trim()} onClick={add}>Créer</button>
+          <button className="btn primary" type="button" disabled={busy || !form.title.trim() || (form.type === "infra" && !form.extOwner.trim() && !form.owner)} onClick={add}>Créer</button>
         </div>
       )}
 
       <div className="ta-views">
-        {([["open", "Ouvertes", counts.open], ["late", "En retard", counts.late], ["unassigned", "Non affectées", counts.unassigned], ["all", "Toutes", counts.all]] as const).map(([k, l, n]) => (
+        {([["mine", "🙋 Mes actions", counts.mine], ["open", "Ouvertes", counts.open], ["late", "En retard", counts.late], ["unassigned", "Non affectées", counts.unassigned], ["all", "Toutes", counts.all]] as const).map(([k, l, n]) => (
           <button key={k} type="button" className={`ta-view${view === k && !st ? " on" : ""}${k === "late" && n ? " crit" : ""}`} onClick={() => { setView(k); setSt(""); }}>
             {l}<em>{n}</em>
           </button>
         ))}
+        <span className="ta-spacer" />
+        <div className="seg" role="tablist" aria-label="Affichage des actions">
+          <button type="button" role="tab" aria-selected={layout === "list"} className={layout === "list" ? "on" : ""} onClick={() => setLayout("list")}>☰ Liste</button>
+          <button type="button" role="tab" aria-selected={layout === "board"} className={layout === "board" ? "on" : ""} onClick={() => setLayout("board")}>▦ Tableau</button>
+        </div>
       </div>
+      {dialog && <MyTaskDialog task={dialog.task} mode={dialog.mode} onClose={() => setDialog(null)}
+        onDone={(d, sp) => { if (edit) patch(dialog.task, { status: "done", doneAt: d, spent: sp }); else void my.status(dialog.task, "done", d, sp); setDialog(null); }}
+        onExtend={(due, reason) => { void my.extend(dialog.task, due, reason); setDialog(null); }} />}
+      {layout === "board" && <TaskBoard<Workspace> p={p} meId={me.id} canManage={edit} onChange={onChange} onOpen={(id) => setOpenId(id)} patch={(t, body) => patch(t as Task, body)} />}
 
       <div className="ta-toolbar">
         <input className="inp ta-search" placeholder="🔍 Rechercher une action, une référence, un responsable…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -702,14 +780,14 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
       {editing && <TaskEditDialog p={p} task={editing} onClose={() => setEditing(null)} onSaved={(w) => { onChange(w); setEditing(null); }} />}
       {alertOn && <AlertDialog projectId={p.id} action={{ id: alertOn.id, title: alertOn.title }} onClose={() => setAlertOn(null)} />}
       {openId && (
-        <ActionDrawer p={p} taskId={openId} canEdit={edit} onChanged={(w) => onChange(w)} onClose={() => setOpenId(null)}
+        <ActionDrawer p={p} taskId={openId} canEdit={edit} meId={me.id} onChanged={(w) => onChange(w)} onClose={() => setOpenId(null)}
           onDiscuss={(t) => { setOpenId(null); setDiscuss(p.tasks.find((x) => x.id === t.id) ?? null); }}
           onAlert={(t) => { setOpenId(null); setAlertOn(p.tasks.find((x) => x.id === t.id) ?? null); }}
           onDelete={(t) => { if (window.confirm(`Supprimer définitivement l’action « ${t.title} » (${t.id}) ?`)) run(() => projectsApi.deleteTask(p.id, t.id), "Action supprimée").then((w) => { onChange(w); setOpenId(null); }, () => undefined); }} />
       )}
 
-      {tasks.length === 0 ? (
-        <div className="empty">{p.tasks.length ? "Aucune action ne correspond aux filtres." : "Aucune action pour l’instant."}</div>
+      {layout === "board" ? null : tasks.length === 0 ? (
+        <div className="empty">{view === "mine" && p.tasks.length ? "Aucune action ouverte ne vous est affectée. Prenez une action « Non affectée » avec 🙋 M’affecter." : p.tasks.length ? "Aucune action ne correspond aux filtres." : "Aucune action pour l’instant."}</div>
       ) : (
         <div className="ta-list">
           <div className="ta-head">
@@ -742,6 +820,10 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
                           )}
                           {(t.successors?.length ?? 0) > 0 && <span className="ta-tag" title={`Bloque : ${t.successors!.map((d) => d.title).join(", ")}`}>↪ bloque {t.successors!.length}</span>}
                           {t.depConflict && <span className="ta-tag crit">⚠️ conflit de dates</span>}
+                          {t.type === "infra" && <span className="ta-tag warn" title={`Date de l’incident / demande : ${t.incidentDate ? frDate(t.incidentDate) : "—"}`}>🛠 Infra{t.ticket ? ` · #${t.ticket}` : ""}{t.extOwner ? ` · ${t.extOwner}` : ""}</span>}
+                          {t.us && <span className="ta-tag" title={t.us.title}>📘 {t.us.id}</span>}
+                          {t.extension && <span className="ta-tag warn" title={t.extension.reason}>⏳ délai demandé → {frDate(t.extension.due)}</span>}
+                          {t.status === "done" && t.doneAt && <span className="ta-tag">✅ réalisée le {frDate(t.doneAt)}</span>}
                         </div>
                       </div>
                     </div>
@@ -752,14 +834,23 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
                           <option value="">— Non affectée</option>
                           {p.team.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                         </select>
+                      ) : t.owner?.id !== me.id && t.status !== "done" ? (
+                        <button type="button" className="btn sm" disabled={my.busy} title="Vous affecter cette action"
+                          onClick={() => { if (!t.owner || window.confirm(`Cette action est affectée à ${t.owner.name}. Vous l’affecter ?`)) void my.claim(t); }}>🙋 M’affecter</button>
                       ) : null}
+
                       <span className={`ta-av${t.owner ? "" : " none"}`} aria-hidden="true">{t.owner ? initials(t.owner.name) : "?"}</span>
-                      <span className="ta-oname">{t.owner?.name ?? "Non affectée"}</span>
+                      <span className="ta-oname">{t.owner?.name ?? (t.type === "infra" && t.extOwner ? `${t.extOwner} (externe)` : "Non affectée")}</span>
                     </div>
                     <div className={`ta-due ${due.cls}`}>{due.text}</div>
                     <div onClick={(e) => e.stopPropagation()}>
                       {edit ? (
-                        <select className={`ta-status st-${t.status}`} value={t.status} disabled={busy} aria-label="Statut" onChange={(e) => patch(t, { status: e.target.value })}>
+                        <select className={`ta-status st-${t.status}`} value={t.status} disabled={busy} aria-label="Statut" onChange={(e) => (e.target.value === "done" ? setDialog({ task: t, mode: "done" }) : patch(t, { status: e.target.value }))}>
+                          {p.statuses.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
+                        </select>
+                      ) : t.owner?.id === me.id ? (
+                        <select className={`ta-status st-${t.status}`} value={t.status} disabled={my.busy} aria-label="Statut de mon action"
+                          onChange={(e) => (e.target.value === "done" ? setDialog({ task: t, mode: "done" }) : void my.status(t, e.target.value))}>
                           {p.statuses.map((s) => <option key={s.code} value={s.code}>{s.label}</option>)}
                         </select>
                       ) : (
@@ -774,8 +865,13 @@ function TasksTab({ p, onChange }: { p: Workspace; onChange: (w?: Workspace) => 
                           <button type="button" onClick={() => { setMenu(null); setOpenId(t.id); }}>📝 Ouvrir la fiche</button>
                           {edit && <button type="button" onClick={() => { setMenu(null); setEditing(t); }}>✏️ Modifier (formulaire)</button>}
                           <button type="button" onClick={() => { setMenu(null); setDiscuss(t); }}>💬 Discuter</button>
+                          <button type="button" onClick={() => { setMenu(null); setOpenId(t.id); }}>💬 Commenter</button>
+                          {t.owner?.id === me.id && t.status !== "done" && <button type="button" onClick={() => { setMenu(null); setDialog({ task: t, mode: "extend" }); }}>⏳ Demander un délai</button>}
+                          {!edit && t.owner?.id === me.id && t.status !== "done" && <button type="button" onClick={() => { setMenu(null); setDialog({ task: t, mode: "done" }); }}>✅ Marquer terminée</button>}
+                          {edit && t.extension && <button type="button" onClick={() => { setMenu(null); void my.decide(t, "approved"); }}>✅ Accorder le délai ({frDate(t.extension.due)})</button>}
+                          {edit && t.extension && <button type="button" onClick={() => { setMenu(null); const c = window.prompt("Motif du refus ?") ?? ""; if (c) void my.decide(t, "rejected", c); }}>✖ Refuser le délai</button>}
                           <button type="button" onClick={() => { setMenu(null); setAlertOn(t); }}>🚨 Lancer une alerte</button>
-                          {edit && t.status !== "done" && <button type="button" onClick={() => { setMenu(null); patch(t, { status: "done" }); }}>✅ Marquer terminée</button>}
+                          {edit && t.status !== "done" && <button type="button" onClick={() => { setMenu(null); setDialog({ task: t, mode: "done" }); }}>✅ Marquer terminée</button>}
                           {edit && (
                             <button type="button" className="danger" onClick={() => { setMenu(null); if (window.confirm(`Supprimer définitivement l’action « ${t.title} » (${t.id}) ?`)) run(() => projectsApi.deleteTask(p.id, t.id), "Action supprimée").then(onChange, () => undefined); }}>
                               🗑 Supprimer

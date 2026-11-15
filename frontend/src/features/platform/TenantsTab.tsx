@@ -9,6 +9,8 @@ import { fmtDay, KIND_LABEL, REQUEST_LABEL, REQUEST_TONE, SUB_TONE, TENANT_TONE 
 import { TenantRightsCard } from "./TenantRightsCard";
 import { TenantProfileEditor } from "./TenantProfileEditor";
 import { TenantClientDomains } from "./TenantClientDomains";
+import { PilotTenantNotifications } from "../notifications/PilotTenantNotifications";
+import { ExcelImportAccessCard } from "../import/ExcelImportAccess";
 
 const STATUSES: [string, string][] = [
   ["", "Tous les statuts"],
@@ -250,7 +252,7 @@ function TenantDetail({
   const [newSub, setNewSub] = useState({ version: "", endDate: "", contractReference: "" });
   const [subChange, setSubChange] = useState({ status: "", endDate: "", reason: "" });
   const [stock, setStock] = useState({ kind: "named", delta: "", reason: "" });
-  const [pane, setPane] = useState<"info" | "domains">("info");
+  const [pane, setPane] = useState<"info" | "domains" | "notif">("info");
   const refresh = () => {
     tenant.reload();
     sub.reload();
@@ -269,14 +271,19 @@ function TenantDetail({
     <Modal title={t ? `${t.name} · ${t.slug}` : "Entreprise"} onClose={onClose} wide>
       {!t || !s ? (
         <Loading />
+      ) : pane === "notif" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Tabs<"info" | "domains" | "notif"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"], ["notif", "Notifications e-mail"]]} value={pane} onChange={setPane} />
+          <PilotTenantNotifications tenantId={id} />
+        </div>
       ) : pane === "domains" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Tabs<"info" | "domains"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"]]} value={pane} onChange={setPane} />
+          <Tabs<"info" | "domains" | "notif"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"], ["notif", "Notifications e-mail"]]} value={pane} onChange={setPane} />
           <TenantClientDomains tenantId={id} />
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Tabs<"info" | "domains"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"]]} value={pane} onChange={setPane} />
+          <Tabs<"info" | "domains" | "notif"> tabs={[["info", "Fiche entreprise"], ["domains", "Domaines clients"], ["notif", "Notifications e-mail"]]} value={pane} onChange={setPane} />
           <div className="kpis">
             <div className="kpi">
               <label>Statut</label>
@@ -350,6 +357,7 @@ function TenantDetail({
           </Card>
 
           <TenantRightsCard tenantId={id} />
+          <ExcelImportAccessCard url={`/platform/tenants/${id}/excel-import`} pilot />
           <TenantProfileEditor tenant={t} onSaved={refresh} />
 
           <Card

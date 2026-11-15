@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Copyright } from "./Copyright";
 
 import type { Route } from "../App";
 import { Brand } from "../pages/LoginPage";
@@ -76,6 +77,8 @@ export function Shell({
             <i />
             {t("shell.backendData")}
           </span>
+          <Copyright compact />
+          <span style={{ fontSize: 10, opacity: 0.7 }}>Créé par ZirconAI</span>
         </div>
       </aside>
       <div className="work">

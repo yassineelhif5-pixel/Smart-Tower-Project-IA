@@ -14,10 +14,11 @@ import { ConnectorAssignmentsTab } from "../features/platform/ConnectorAssignmen
 import { PilotUsersTab } from "../features/platform/PilotUsersTab";
 import { ContractsTab } from "../features/platform/ContractsTab";
 import { MaintenanceTab } from "../features/platform/MaintenanceTab";
+import { PlatformConfigTab } from "../features/platform/PlatformConfigTab";
 import { SaaSReportPanel } from "../features/configuration/SaaSReportPanel";
 import { AssistantPilotTab } from "../features/assistant/AssistantSettings";
 
-type Tab = "dashboard" | "tenants" | "contracts" | "users" | "offers" | "requests" | "vouchers" | "domains" | "connectors" | "maintenance" | "audit" | "database" | "saas" | "assistants";
+type Tab = "dashboard" | "tenants" | "contracts" | "users" | "offers" | "requests" | "vouchers" | "domains" | "connectors" | "maintenance" | "audit" | "database" | "saas" | "assistants" | "config";
 const TABS: [Tab, string][] = [
   ["dashboard", "Tableau de bord"],
   ["saas", "État SaaS"],
@@ -33,6 +34,7 @@ const TABS: [Tab, string][] = [
   ["maintenance", "Maintenance & support"],
   ["audit", "Journal de la plateforme"],
   ["database", "Base de données"],
+  ["config", "Configuration"],
 ];
 
 const fromHash = (): Tab => {
@@ -101,6 +103,7 @@ export function PilotPage() {
         {tab === "dashboard" && <DashboardTab onOpenRequests={() => setTab("requests")} />}
         {tab === "saas" && <SaaSReportPanel scope="platform" />}
         {tab === "tenants" && <TenantsTab />}
+        {tab === "config" && <PlatformConfigTab />}
         {tab === "contracts" && <ContractsTab />}
         {tab === "users" && <PilotUsersTab />}
         {tab === "offers" && <OffersTab />}

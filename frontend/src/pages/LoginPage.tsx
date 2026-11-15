@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Copyright } from "../components/Copyright";
 
 import { ApiError } from "../api/client";
 import { API_BASE } from "../api/client";
@@ -56,6 +57,7 @@ export function AuthLayout({ title, sub, children }: { title: string; sub: strin
             </p>
           </div>
           {children}
+          <div style={{ textAlign: "center", borderTop: "1px solid var(--line, #e2e8f0)", paddingTop: 10 }}><Copyright /></div>
         </div>
       </div>
     </main>

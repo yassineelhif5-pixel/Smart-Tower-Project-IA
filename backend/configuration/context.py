@@ -24,3 +24,21 @@ def reset(token):
 
 def current_ip():
     return _client_ip.get()
+
+
+_request = ContextVar("current_request", default=None)
+
+
+def set_request(request):
+    return _request.set(request)
+
+
+def reset_request(token):
+    _request.reset(token)
+
+
+def current_user():
+    """Utilisateur authentifié de la requête en cours (auteur d'une modification), ou None (tâche planifiée…)."""
+    request = _request.get()
+    user = getattr(request, "user", None) if request is not None else None
+    return user if (user is not None and getattr(user, "is_authenticated", False)) else None

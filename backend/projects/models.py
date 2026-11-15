@@ -210,6 +210,10 @@ class Action(TenantOwned):
     owner = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     status = models.CharField(max_length=10, choices=ACTION_STATUSES)
     type = models.CharField(max_length=40, blank=True)
+    # Tâches « Infra / autre équipe » : ticket, personne ou groupe en charge (hors projet), date de l'incident ou de la demande.
+    ticket = models.CharField(max_length=60, blank=True, default="")
+    ext_owner = models.CharField(max_length=120, blank=True, default="")
+    incident_date = models.DateField(null=True, blank=True)
     due = models.DateField(null=True, blank=True)
     # Lot 2b (actions) :
     phase = models.CharField(max_length=60, blank=True)
@@ -294,6 +298,10 @@ class TimeEntry(TenantOwned):
     line = models.CharField(max_length=40, blank=True, default="")
     # Étape courante du workflow de validation propre au projet (0 = premier valideur).
     approval_step = models.PositiveSmallIntegerField(default=0)
+    # Motif du dernier refus (valideur interne ou client) : la saisie doit être corrigée puis renvoyée.
+    reject_reason = models.CharField(max_length=500, blank=True, default="")
+    # Trace des validations : [{"by", "byId", "at", "step", "decision"}] (valideurs internes successifs puis client).
+    approvals = models.JSONField(default=list, blank=True)
     approved_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="approved_time_entries")
     approved_at = models.DateTimeField(null=True, blank=True)
 
@@ -304,7 +312,7 @@ class TimeEntry(TenantOwned):
 
 
 ABSENCE_KINDS = [("cp", "Congés payés"), ("rtt", "RTT"), ("sick", "Maladie"), ("training", "Formation"),
-                 ("holiday", "Jour férié"), ("unpaid", "Congé sans solde"), ("other", "Autre absence")]
+                 ("holiday", "Jour férié"), ("unpaid", "Congé sans solde"), ("other", "Absence / temps non saisi")]
 
 
 class TimeAbsence(TenantOwned):

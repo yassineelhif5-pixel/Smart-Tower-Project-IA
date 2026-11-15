@@ -55,3 +55,24 @@ class ClientDocument(TenantOwned):
     class Meta:
         ordering = ["-period", "person_id", "kind"]
         indexes = [models.Index(fields=["client", "period"], name="clientdoc_client_period")]
+
+
+class InvoiceTemplate(TenantOwned):
+    """Modèle .docx de facture déposé par l'administrateur, pour une personne, un groupe de personnes, une société
+    (intervenants externes qui y sont rattachés) ou par défaut. Priorité : personne > groupe > société > défaut > modèle intégré."""
+
+    SCOPES = [("person", "Personne"), ("group", "Groupe de personnes"), ("company", "Société"), ("default", "Par défaut")]
+
+    name = models.CharField(max_length=120)
+    scope = models.CharField(max_length=10, choices=SCOPES)
+    persons = models.ManyToManyField(USER, blank=True, related_name="invoice_templates")
+    company = models.CharField(max_length=120, blank=True)
+    filename = models.CharField(max_length=255)
+    content = models.BinaryField()
+    size_bytes = models.PositiveIntegerField(default=0)
+    uploaded_by = models.ForeignKey(USER, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["scope", "name"]

@@ -774,7 +774,8 @@ class ExcelImportJobsView(APIView):
     """Imports en arrière-plan de l'utilisateur (suivi de l'avancement)."""
 
     def get(self, request):
-        if not in_active_tenant(request.user):
+        from .excel_access import can_import
+        if not in_active_tenant(request.user) or not can_import(request.user):
             return Response({"jobs": []})
         return Response({"jobs": jobs_of(request.user)[:10]})
 
@@ -788,8 +789,10 @@ class ExcelImportView(APIView):
         user = request.user
         if not in_active_tenant(user):
             raise ApiError("FORBIDDEN_PERMISSION", "Accès réservé aux utilisateurs d'une entreprise.", status.HTTP_403_FORBIDDEN)
-        if not (user.is_app_admin or has_perm(user, "project", "create") or has_perm(user, "action", "create")):
-            raise ApiError("FORBIDDEN_PERMISSION", "Votre profil ne permet pas d'importer des actions.", status.HTTP_403_FORBIDDEN)
+        from .excel_access import can_import
+        if not can_import(user):
+            raise ApiError("FORBIDDEN_PERMISSION", "Le module d'import Excel n'est pas autorisé pour votre profil (à demander à l'administrateur).",
+                           status.HTTP_403_FORBIDDEN)
         f = request.FILES.get("file")
         if f is None:
             raise ApiError("VALIDATION_ERROR", "Choisissez un fichier Excel (.xlsx) ou CSV.")

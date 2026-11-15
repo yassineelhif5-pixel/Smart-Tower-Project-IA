@@ -34,8 +34,11 @@ def provision(tenant):
             defaults["settings"] = dict(settings.DEFAULT_SMTP_SETTINGS)
         NotificationChannel.objects.get_or_create(tenant=tenant, kind=kind, defaults=defaults)
         for event, _ in EVENTS:
+            from configuration.mailer import DEFAULT_EMAIL_EVENTS
             NotificationRule.objects.get_or_create(tenant=tenant, event=event, channel=kind,
-                                                   defaults={"enabled": kind == "inapp"})
+                                                   defaults={"enabled": kind == "inapp" or (kind == "email" and event in DEFAULT_EMAIL_EVENTS)})
+    from configuration.smtp_tools import apply_defaults
+    apply_defaults(tenant)  # SMTP par défaut (.env) : serveur, identifiant et clé chiffrée
 
 
 @transaction.atomic

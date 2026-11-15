@@ -97,6 +97,8 @@ class LicenseIsValid(BasePermission):
         user = request.user
         if not (user and user.is_authenticated and user.tenant_id) or user.is_platform_admin:
             return True
+        if getattr(user, "pilot_mode", False):  # Pilote dans Configuration : ne consomme ni ne libère de licence
+            return True
         from licensing import services
         if not services.is_enforced(user.tenant):
             return True

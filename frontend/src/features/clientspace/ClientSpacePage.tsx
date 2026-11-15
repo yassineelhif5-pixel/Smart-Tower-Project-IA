@@ -9,6 +9,13 @@ import type { Me } from "../../types/api";
 import "./clientspace.css";
 import { AiUsageReport } from "../aiusage/AiUsageReport";
 import { PortalBilling, PortalOrders, PortalRecap, PortalTimesheets } from "./ClientPortal";
+import { InvoiceTemplates } from "./InvoiceTemplates";
+import { ClientRates } from "./ClientRates";
+import { BudgetReport } from "./BudgetReport";
+import { Library } from "./Library";
+import { LicenceReport } from "./LicenceReport";
+import { ValidationBoard, type VEntry } from "../timesheet/ValidationBoard";
+import "../timesheet/sheet.css";
 
 type Num = string | number | null;
 type Doc = { id: string; kind: "cra" | "invoice"; kindLabel: string; client: string; clientName: string; period: string; periodLabel: string;
@@ -19,7 +26,7 @@ type Space = { clients: { code: string; name: string; support: Contract }[]; doc
   supportLicense: { enabled: boolean; levels: string[]; maxClients: number | null }; levels: { code: string; label: string }[];
   clientValidationPending: number; canGenerate: boolean; people: { id: number; name: string }[]; billing: Record<string, unknown> | null };
 type Group = { client: string; clientName: string; person: number; personName: string; period: string; periodLabel: string; days: Num; hours: Num;
-  projects: string[]; entries: { id?: number; date: string; project: string; task: string; hours: Num; approvedBy: string }[] };
+  projects: string[]; ready?: boolean; notReady?: string; entries: { id?: number; date: string; project: string; projectName?: string; line?: string; task: string; hours: Num; approvedBy: string }[] };
 
 const n = (v: Num) => Number(v ?? 0);
 const eur = (v: Num) => (v === null || v === undefined ? "—" : n(v).toLocaleString("fr-FR", { style: "currency", currency: "EUR" }));
@@ -30,7 +37,7 @@ export function ClientSpacePage({ me }: { me: Me }) {
   const [period, setPeriod] = useState("");
   const q = new URLSearchParams({ ...(client ? { client } : {}), ...(period ? { period } : {}) }).toString();
   const space = useApi(() => api.get<Space>(`/client-space?${q}`), [q]);
-  const [tab, setTab] = useState<"docs" | "times" | "bills" | "validate" | "orders" | "recap" | "support" | "ai" | "billing">("docs");
+  const [tab, setTab] = useState<"docs" | "times" | "bills" | "validate" | "orders" | "recap" | "support" | "ai" | "billing" | "rates" | "budget" | "library" | "licences">("docs");
   useEffect(() => { if (space.data?.isClient && space.data.clientValidationPending) setTab((t) => (t === "docs" ? "validate" : t)); }, [space.data?.isClient, space.data?.clientValidationPending]);
   if (space.error) return <div className="page"><ErrorNotice error={space.error} onRetry={space.reload} /></div>;
   if (!space.data) return <Loading />;
@@ -38,6 +45,8 @@ export function ClientSpacePage({ me }: { me: Me }) {
   const tabs: [typeof tab, string][] = [["docs", "CRA et factures"], ["times", "Saisies & reporting"], ["bills", "Facturation par utilisateur"]];
   if (s.isClient || s.isAdmin) tabs.push(["validate", `Temps à valider${s.clientValidationPending ? ` (${s.clientValidationPending})` : ""}`]);
   tabs.push(["orders", "Commandes"], ["recap", "Récap e-mail"]);
+  tabs.push(["library", "📚 Documentation"], ["budget", "Rapport budgétaire"], ["licences", "Licences"]);
+  tabs.push(["rates", "TJM & contrats"]);
   tabs.push(["support", "Support N1 / N2 / N3"]);
   tabs.push(["ai", "Consommation IA"]);
   if (s.isAdmin) tabs.push(["billing", "Facturation"]);
@@ -52,11 +61,15 @@ export function ClientSpacePage({ me }: { me: Me }) {
       {tab === "validate" && <Validation onDone={space.reload} />}
       {tab === "support" && <Support s={s} reload={space.reload} />}
       {tab === "ai" && <AiUsageReport />}
+      {tab === "rates" && <ClientRates clients={s.clients} />}
+      {tab === "budget" && <BudgetReport />}
+      {tab === "library" && <Library />}
+      {tab === "licences" && <LicenceReport clients={s.clients} />}
       {tab === "times" && <PortalTimesheets />}
       {tab === "bills" && <PortalBilling />}
       {tab === "orders" && <PortalOrders />}
       {tab === "recap" && <PortalRecap />}
-      {tab === "billing" && s.billing && <><Billing conf={s.billing} reload={space.reload} /><ModuleProfiles /></>}
+      {tab === "billing" && s.billing && <><Billing conf={s.billing} reload={space.reload} /><InvoiceTemplates /><ModuleProfiles /></>}
     </div>
   );
 }
@@ -131,56 +144,32 @@ function Documents({ s, client, setClient, period, setPeriod, reload }: { s: Spa
 function Validation({ onDone }: { onDone: () => void }) {
   const groups = useApi(() => api.get<Group[]>("/client-space/time-validation"));
   const { run, busy } = useAction();
-  const [open, setOpen] = useState<string | null>(null);
-  const [reason, setReason] = useState<Record<string, string>>({});
   if (groups.error) return <ErrorNotice error={groups.error} onRetry={groups.reload} />;
   if (!groups.data) return <Loading />;
-  const decide = (g: Group, decision: "approved" | "rejected") =>
-    void run(() => api.post<{ updated: number; invoice: string | null }>("/client-space/time-validation",
-      { client: g.client, person: g.person, period: g.period, decision, comment: reason[`${g.client}|${g.person}|${g.period}`] ?? "" }),
-    decision === "approved" ? "Temps validés" : "Temps refusés").then(() => { groups.reload(); onDone(); }, () => undefined);
-  const [refusing, setRefusing] = useState<{ id: number; comment: string } | null>(null);
-  const decideOne = (g: Group, id: number, decision: "approved" | "rejected", comment = "") =>
-    void run(() => api.post<{ updated: number; invoice: string | null }>("/client-space/time-validation",
-      { client: g.client, person: g.person, period: g.period, decision, comment, entries: [id] }),
-    decision === "approved" ? "Saisie validée" : "Saisie refusée").then(() => { setRefusing(null); groups.reload(); onDone(); }, () => undefined);
-  if (groups.data.length === 0) return <section className="cs-card"><p className="muted">✅ Aucun temps en attente de votre validation.</p></section>;
+  const byId = new Map<number, Group>();
+  const entries: VEntry[] = [];
+  for (const g of groups.data) for (const e of g.entries) {
+    if (e.id == null) continue;
+    byId.set(e.id, g);
+    entries.push({ id: e.id, date: e.date, person: g.personName, personId: g.person, project: e.project, projectName: e.projectName, line: e.line ?? "",
+      task: e.task, hours: n(e.hours), approvedBy: e.approvedBy, locked: g.ready === false ? `Validation possible quand tout le mois est envoyé : ${g.notReady}` : undefined });
+  }
+  const post = (g: Group, ids: number[], decision: "approved" | "rejected", comment = "") =>
+    api.post<{ updated: number; invoice: string | null }>("/client-space/time-validation", { client: g.client, person: g.person, period: g.period, decision, comment, entries: ids });
+  const approve = (ids: number[]) => {
+    const parts = new Map<Group, number[]>();
+    ids.forEach((id) => { const g = byId.get(id); if (g) parts.set(g, [...(parts.get(g) ?? []), id]); });
+    void run(async () => { for (const [g, list] of parts) await post(g, list, "approved"); }, ids.length > 1 ? `${ids.length} saisies validées` : "Saisie validée")
+      .then(() => { groups.reload(); onDone(); }, () => undefined);
+  };
+  const reject = (id: number, comment: string) => {
+    const g = byId.get(id);
+    if (g) void run(() => post(g, [id], "rejected", comment), "Saisie refusée").then(() => { groups.reload(); onDone(); }, () => undefined);
+  };
   return (
     <section className="cs-card cs-val">
-      <p className="muted">Ces temps ont été validés par le chef de projet. Votre validation déclenche le compte rendu d'activité et la facture du mois.</p>
-      {groups.data.map((g) => {
-        const k = `${g.client}|${g.person}|${g.period}`;
-        return (
-          <div key={k} className="cs-group">
-            <div className="cs-group-h">
-              <div><b>{g.personName}</b> · {g.periodLabel} · {g.clientName}<small>{g.projects.join(", ")} · {n(g.days).toLocaleString("fr-FR")} j ({n(g.hours)} h) · {g.entries.length} saisie(s)</small></div>
-              <button type="button" className="btn sm" onClick={() => setOpen(open === k ? null : k)}>{open === k ? "Masquer" : "Détail"}</button>
-              <button type="button" className="btn sm primary" disabled={busy} onClick={() => decide(g, "approved")}>✔ Valider le mois</button>
-            </div>
-            {open === k && (
-              <table className="tbl cs-detail"><thead><tr><th>Date</th><th>Projet</th><th>Tâche</th><th className="num">Heures</th><th>Validé par</th><th>Votre décision</th></tr></thead>
-                <tbody>{g.entries.map((e, i) => <tr key={e.id ?? i}><td>{new Date(e.date).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" })}</td><td>{e.project}</td><td>{e.task}</td><td className="num">{n(e.hours)}</td><td>{e.approvedBy}</td>
-                  <td>{e.id != null && (refusing?.id === e.id ? (
-                    <span style={{ display: "inline-flex", gap: 6 }}>
-                      <input className="inp" style={{ minWidth: 200 }} autoFocus placeholder="Motif du refus (obligatoire)" aria-label="Motif du refus de la saisie" value={refusing.comment} onChange={(ev) => setRefusing({ id: e.id as number, comment: ev.target.value })} />
-                      <button type="button" className="btn sm" disabled={busy || !refusing.comment.trim()} onClick={() => decideOne(g, e.id as number, "rejected", refusing.comment)}>Refuser</button>
-                      <button type="button" className="btn sm ghost" onClick={() => setRefusing(null)}>Annuler</button>
-                    </span>
-                  ) : (
-                    <span style={{ display: "inline-flex", gap: 6 }}>
-                      <button type="button" className="btn sm primary" disabled={busy} onClick={() => decideOne(g, e.id as number, "approved")}>✔ Valider</button>
-                      <button type="button" className="btn sm" disabled={busy} onClick={() => setRefusing({ id: e.id as number, comment: "" })}>✖ Refuser</button>
-                    </span>
-                  ))}</td></tr>)}</tbody>
-              </table>
-            )}
-            <div className="cs-refuse">
-              <input className="inp" placeholder="Motif en cas de refus" aria-label="Motif du refus" value={reason[k] ?? ""} onChange={(e) => setReason({ ...reason, [k]: e.target.value })} />
-              <button type="button" className="btn sm" disabled={busy || !(reason[k] ?? "").trim()} onClick={() => decide(g, "rejected")}>✖ Refuser</button>
-            </div>
-          </div>
-        );
-      })}
+      <ValidationBoard entries={entries} busy={busy} onApprove={approve} onReject={reject}
+        intro="Ces temps ont été validés en interne. Votre validation déclenche le compte rendu d'activité et la facture du mois (un mois n'est validable que lorsqu'il est entièrement envoyé)." />
     </section>
   );
 }

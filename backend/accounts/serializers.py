@@ -42,6 +42,7 @@ class MeSerializer(serializers.Serializer):
             "isSupport": user.is_platform_support,
             "maintenanceEnabled": maintenance,
             "clientSpaceEnabled": _client_space(user),
+            "excelImportEnabled": _excel_import(user),
             "tenant": {"slug": user.tenant.slug, "name": user.tenant.name, "status": user.tenant.status} if user.tenant_id else None,
             "mustChangePassword": user.must_change_password,
             "permissions": permissions_of(user.role_id, user.tenant) if role else {},
@@ -74,6 +75,14 @@ def validate_new_password(password, user=None, field="new_password"):
         password_validation.validate_password(password, user)
     except DjangoValidationError as exc:
         raise serializers.ValidationError({field: exc.messages}) from exc
+
+
+def _excel_import(user):
+    try:
+        from projects.excel_access import can_import
+        return can_import(user)
+    except Exception:
+        return False
 
 
 def _client_space(user):

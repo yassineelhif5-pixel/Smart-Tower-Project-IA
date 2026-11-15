@@ -361,6 +361,21 @@ function UserForm({
             <input id="u_team" className="inp" value={form.team ?? ""} onChange={(e) => set("team", e.target.value)} />
           </Field>
         </div>
+        <div className="frow">
+          <Field id="u_company" label="Société de rattachement" error={errors.company}
+            hint="Ex. la société d'un consultant externe : son modèle de facture s'applique à tous ses membres.">
+            <input id="u_company" className="inp" value={form.company ?? ""} onChange={(e) => set("company", e.target.value)} />
+          </Field>
+          <Field id="u_rate" label="TJM HT (€)" error={errors.dailyRate}
+            hint="Utilisé pour la facture générée avec le CRA (sauf TJM spécifique au projet).">
+            <input id="u_rate" className="inp" type="number" min={0} step="0.01" value={form.dailyRate ?? ""}
+              onChange={(e) => set("dailyRate", e.target.value === "" ? null : e.target.value)} />
+          </Field>
+        </div>
+        <label className="cs-check" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={!!form.external} onChange={(e) => set("external", e.target.checked)} />
+          Intervenant externe (rattaché à la société ci-dessus)
+        </label>
         {!user && (
           <Field
             id="u_password"
@@ -380,7 +395,7 @@ function UserForm({
         )}
         {Object.keys(errors).some(
           (k) =>
-            !["firstName", "lastName", "username", "email", "role", "client", "title", "team", "password"].includes(k),
+            !["firstName", "lastName", "username", "email", "role", "client", "title", "team", "password", "company", "dailyRate"].includes(k),
         ) && (
           <div className="callout warn" role="alert">
             <b>{Object.values(errors).join(" ")}</b>

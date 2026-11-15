@@ -68,6 +68,9 @@ def _rights(user, project):
         # Budget et TJM : administrateur, chef de projet, ou profil financier (« money »).
         "canSeeMoney": admin or is_pm or bool(user.role and user.role.money),
         "canManageDocs": admin or is_pm or is_tl or edit,
+        # Création d'action : tout membre interne de l'équipe du projet.
+        "canCreateTasks": admin or is_pm or is_tl or bool(user.role and user.role.internal
+                                                          and ProjectAccess.objects.filter(project=project, user=user).exists()),
     }
 
 
@@ -86,8 +89,12 @@ def _dep_row(a, project_id=None):
 def _task_row(a, deps=None, succ=None):
     row = {"id": a.id, "title": a.title, "status": a.status, "statusLabel": STATUS_LABELS.get(a.status, a.status),
            "owner": _person(a.owner), "due": a.due, "startDate": a.start_date, "prio": a.prio, "phase": a.phase,
-           "est": a.est, "done": a.done, "raf": a.raf,
-           "instance": {"id": a.instance_id, "name": a.instance.name} if a.instance_id else None}
+           "est": a.est, "done": a.done, "spent": a.done, "raf": a.raf,
+           "instance": {"id": a.instance_id, "name": a.instance.name} if a.instance_id else None,
+           "doneAt": a.done_at, "type": a.type, "ticket": a.ticket, "extOwner": a.ext_owner, "incidentDate": a.incident_date,
+           "us": {"id": a.us_id, "title": a.us.title, "sprint": a.us.sprint} if a.us_id else None,
+           "extension": next((h for h in reversed(a.history or []) if isinstance(h, dict) and h.get("type") == "extension"
+                              and h.get("status") == "pending"), None)}
     if deps is not None:
         preds = [_dep_row(d, a.project_id) for d in deps.get(a.id, [])]
         row["dependsOn"] = preds
@@ -122,7 +129,7 @@ def _detail(user, project):
     team = (ProjectAccess.objects.filter(project=project).select_related("user", "user__role")
             .filter(user__is_active=True).order_by("user__first_name", "user__username"))
     tasks_qs = Action.objects.filter(project=project) if (user.is_app_admin or rights["isPm"]) else visible_actions(user).filter(project=project)
-    tasks = list(tasks_qs.select_related("owner", "owner__role", "instance").order_by("status", "due", "id"))
+    tasks = list(tasks_qs.select_related("owner", "owner__role", "instance", "us").order_by("status", "due", "id"))
     load = dict(Action.objects.filter(project=project).exclude(status="done").values("owner_id")
                 .annotate(n=Count("id")).values_list("owner_id", "n"))
     members = [{**_person(a.user), "canEdit": a.can_edit, "isPm": a.user_id == project.pm_id,
@@ -414,6 +421,20 @@ def _apply_task(project, action, data):
             setattr(action, field, parsed)
     if "prio" in data:
         action.prio = str(data.get("prio") or "")[:20]
+    if "type" in data:
+        action.type = str(data.get("type") or "")[:40]
+    if "ticket" in data:
+        action.ticket = str(data.get("ticket") or "").strip()[:60]
+    if "extOwner" in data:
+        action.ext_owner = str(data.get("extOwner") or "").strip()[:120]
+    if "incidentDate" in data:
+        raw = data.get("incidentDate")
+        try:
+            action.incident_date = timezone.datetime.strptime(raw, "%Y-%m-%d").date() if raw else None
+        except (TypeError, ValueError):
+            raise ApiError("VALIDATION_ERROR", "Date de l'incident ou de la demande invalide.")
+    if action.type == "infra" and not (action.ext_owner or action.owner_id):
+        raise ApiError("VALIDATION_ERROR", "Tâche infra : indiquez la personne ou le groupe en charge.")
     if "instance" in data:
         iid = data.get("instance")
         if iid:
@@ -423,11 +444,34 @@ def _apply_task(project, action, data):
             action.instance = None
     if "phase" in data:
         action.phase = str(data.get("phase") or "")[:60]
+    for key, field in (("spent", "done"), ("raf", "raf")):
+        if key in data:
+            try:
+                setattr(action, field, Decimal(str(max(0.0, float(data.get(key) or 0)))).quantize(Decimal("0.01")))
+            except (TypeError, ValueError):
+                raise ApiError("VALIDATION_ERROR", "Temps invalide.")
+    if "doneAt" in data and action.status == "done":
+        try:
+            action.done_at = timezone.datetime.strptime(str(data["doneAt"]), "%Y-%m-%d").date() if data.get("doneAt") else timezone.localdate()
+        except ValueError:
+            raise ApiError("VALIDATION_ERROR", "Date de réalisation invalide.")
     if "est" in data:
         try:
             action.est = Decimal(str(max(0.0, float(data.get("est") or 0)))).quantize(Decimal("0.01"))
         except (TypeError, ValueError):
             raise ApiError("VALIDATION_ERROR", "Charge estimée invalide.")
+
+
+def require_done_info(action, data):
+    """Passage au statut « Terminé » : temps réellement passé (> 0) et date de réalisation obligatoires."""
+    if data.get("status") != "done" or action.status == "done":
+        return
+    try:
+        spent = float(data.get("spent") if data.get("spent") not in (None, "") else (action.done or 0))
+    except (TypeError, ValueError):
+        spent = 0
+    if spent <= 0 or not data.get("doneAt"):
+        raise ApiError("VALIDATION_ERROR", "Pour terminer l'action, saisissez le temps réellement passé et la date de réalisation.")
 
 
 class ProjectTasksView(APIView):
@@ -440,7 +484,11 @@ class ProjectTasksView(APIView):
         return project
 
     def post(self, request, pk):
-        project = self._check(request, pk)
+        project = _project(request.user, pk)
+        rights = _rights(request.user, project)
+        member = ProjectAccess.objects.filter(project=project, user=request.user).exists()
+        if not (rights["canManageTasks"] or (member and request.user.role and request.user.role.internal)):
+            raise ApiError("FORBIDDEN_PERMISSION", "Seuls les membres de l'équipe du projet créent des actions.", status.HTTP_403_FORBIDDEN)
         action = Action(tenant=project.tenant, project=project, id=_next_action_id(project), status="todo", title="")
         _apply_task(project, action, {"title": "", **request.data})
         action.save()
@@ -453,6 +501,7 @@ class ProjectTasksView(APIView):
         project = self._check(request, pk)
         action = get_object_or_404(Action.objects.select_related("owner"), project=project, pk=task_id)
         before = (action.owner.display_name if action.owner else "—", STATUS_LABELS.get(action.status, action.status))
+        require_done_info(action, request.data)
         _apply_task(project, action, request.data)
         action.save()
         if "dependsOn" in request.data:
@@ -954,3 +1003,181 @@ class ActionCommentsView(APIView):
                                         body=f"{request.user.display_name} : {body[:400]} · {project.id}")
         audit.record(request.user, f"Tâche {action.id}", "Commentaire ajouté", "", body[:200], tenant=request.user.tenant)
         return Response({**self._row(c), "notified": notified}, status=status.HTTP_201_CREATED)
+
+
+
+class MyTaskView(APIView):
+    """Actions du collaborateur sur une tâche du projet (sans droit de gestion des tâches) :
+    POST {op: claim | status | extend | extension_decision, ...}
+    - claim : s'affecter une action non affectée ;
+    - status {status, doneAt?} : changer le statut de SON action (date de réalisation si « Terminé ») ;
+    - extend {due, reason} : demander un délai supplémentaire au chef de projet ;
+    - extension_decision {decision: approved|rejected, comment} : réponse du chef de projet (gestion des tâches)."""
+
+    def post(self, request, pk, task_id):
+        from configuration.models import Notification
+        from .models import ActionComment
+        user = request.user
+        project = _project(user, pk)
+        rights = _rights(user, project)
+        action = get_object_or_404(Action.objects.select_related("owner"), project=project, pk=task_id)
+        member = rights["canManageTasks"] or ProjectAccess.objects.filter(project=project, user=user).exists()
+        if not (member and user.role and user.role.internal):
+            raise ApiError("FORBIDDEN_PERMISSION", "Réservé aux membres de l'équipe du projet.", status.HTTP_403_FORBIDDEN)
+        op = request.data.get("op")
+        now = timezone.now()
+        hist = list(action.history or [])
+
+        def note(text):
+            ActionComment.objects.create(tenant=project.tenant, action=action, author=user, body=text, internal=True,
+                                         at=now.strftime("%Y-%m-%d %H:%M"))
+
+        def tell(u, title, body):
+            if u and u.pk != user.pk:
+                Notification.objects.create(user=u, event="project_alert", title=f"[{project.code}] {title}"[:200], body=f"{body[:400]} · {project.id}")
+
+        if op == "claim":
+            if action.status == "done":
+                raise ApiError("CONFLICT", "Cette action est déjà terminée.", status.HTTP_409_CONFLICT)
+            previous = action.owner if action.owner_id and action.owner_id != user.pk else None
+            action.owner = user
+            hist.append({"at": now.isoformat(), "text": f"{user.display_name} s'est affecté l'action"
+                         + (f" (auparavant : {previous.display_name})" if previous else "")})
+            action.history = hist
+            action.save(update_fields=["owner", "history"])
+            tell(project.pm, f"🙋 {user.display_name} prend l'action « {action.title} »",
+                 "Affectation par le collaborateur" + (f" (auparavant {previous.display_name})." if previous else "."))
+            if previous and previous.pk != project.pm_id:
+                tell(previous, f"🙋 {user.display_name} a repris votre action « {action.title} »", "Vous n'êtes plus responsable de cette action.")
+            audit.record(user, f"Tâche {action.id}", "S'est affecté l'action", "—", user.display_name, tenant=project.tenant)
+        elif op == "status":
+            if action.owner_id != user.pk and not rights["canManageTasks"]:
+                raise ApiError("FORBIDDEN_PERMISSION", "Vous ne pouvez changer le statut que de vos actions.", status.HTTP_403_FORBIDDEN)
+            new = request.data.get("status")
+            if new not in dict(ACTION_STATUSES):
+                raise ApiError("VALIDATION_ERROR", "Statut inconnu.")
+            require_done_info(action, request.data)
+            if new == "done" and request.data.get("spent") not in (None, ""):
+                action.done = Decimal(str(max(0.0, float(request.data["spent"])))).quantize(Decimal("0.01"))
+            before = STATUS_LABELS.get(action.status, action.status)
+            action.status = new
+            if new == "done":
+                raw = request.data.get("doneAt")
+                try:
+                    action.done_at = timezone.datetime.strptime(raw, "%Y-%m-%d").date() if raw else timezone.localdate()
+                except ValueError:
+                    raise ApiError("VALIDATION_ERROR", "Date de réalisation invalide.")
+                if action.done_at > timezone.localdate():
+                    raise ApiError("VALIDATION_ERROR", "La date de réalisation ne peut pas être dans le futur.")
+            else:
+                action.done_at = None
+            hist.append({"at": now.isoformat(), "text": f"Statut : {before} → {STATUS_LABELS.get(new, new)}"
+                         + (f" (réalisée le {action.done_at:%d/%m/%Y})" if action.done_at else "")})
+            action.history = hist
+            action.save(update_fields=["status", "done_at", "history", "done"])
+            if new == "done":
+                tell(project.pm, f"✅ Action terminée : {action.title}", f"{user.display_name} l'a terminée le {action.done_at:%d/%m/%Y}.")
+            audit.record(user, f"Tâche {action.id}", "Statut modifié", before, STATUS_LABELS.get(new, new), tenant=project.tenant)
+        elif op == "edit":
+            if action.owner_id != user.pk and not rights["canManageTasks"]:
+                raise ApiError("FORBIDDEN_PERMISSION", "Seul le responsable de l'action (ou le chef de projet) la modifie.", status.HTTP_403_FORBIDDEN)
+            allowed = {k: request.data[k] for k in ("startDate", "est", "spent", "raf", "status", "doneAt") if k in request.data}
+            require_done_info(action, allowed)
+            before = f"{action.start_date or '—'} · {action.est}h · {action.done}h passées · {STATUS_LABELS.get(action.status, action.status)}"
+            _apply_task(project, action, allowed)
+            if action.done_at and action.done_at > timezone.localdate():
+                raise ApiError("VALIDATION_ERROR", "La date de réalisation ne peut pas être dans le futur.")
+            after = f"{action.start_date or '—'} · {action.est}h · {action.done}h passées · {STATUS_LABELS.get(action.status, action.status)}"
+            hist.append({"at": now.isoformat(), "text": f"Modifiée par {user.display_name} : {after}"})
+            action.history = hist
+            action.save()
+            if action.status == "done" and "status" in allowed:
+                tell(project.pm, f"✅ Action terminée : {action.title}", f"{user.display_name} l'a terminée le {action.done_at:%d/%m/%Y}.")
+            audit.record(user, f"Tâche {action.id}", "Action mise à jour", before, after, tenant=project.tenant)
+        elif op == "extend":
+            if action.owner_id != user.pk:
+                raise ApiError("FORBIDDEN_PERMISSION", "Seul le responsable de l'action demande un délai.", status.HTTP_403_FORBIDDEN)
+            reason = str(request.data.get("reason") or "").strip()[:500]
+            try:
+                due = timezone.datetime.strptime(str(request.data.get("due") or ""), "%Y-%m-%d").date()
+            except ValueError:
+                raise ApiError("VALIDATION_ERROR", "Indiquez la nouvelle échéance souhaitée.")
+            if not reason:
+                raise ApiError("VALIDATION_ERROR", "Expliquez pourquoi le délai est nécessaire.")
+            if action.due and due <= action.due:
+                raise ApiError("VALIDATION_ERROR", "La nouvelle échéance doit être après l'échéance actuelle.")
+            hist.append({"type": "extension", "status": "pending", "at": now.isoformat(), "by": user.display_name, "byId": user.pk,
+                         "from": action.due.isoformat() if action.due else None, "due": due.isoformat(), "reason": reason,
+                         "text": f"Demande de délai : {action.due or '—'} → {due} ({reason})"})
+            action.history = hist
+            action.save(update_fields=["history"])
+            note(f"⏳ Demande de délai supplémentaire jusqu'au {due:%d/%m/%Y} : {reason}")
+            tell(project.pm, f"⏳ Demande de délai : {action.title}", f"{user.display_name} demande jusqu'au {due:%d/%m/%Y} : {reason}")
+            audit.record(user, f"Tâche {action.id}", "Demande de délai", str(action.due or ""), f"{due} · {reason}", tenant=project.tenant)
+        elif op == "extension_decision":
+            if not rights["canManageTasks"]:
+                raise ApiError("FORBIDDEN_PERMISSION", "Réservé au chef de projet.", status.HTTP_403_FORBIDDEN)
+            req = next((h for h in reversed(hist) if isinstance(h, dict) and h.get("type") == "extension" and h.get("status") == "pending"), None)
+            if req is None:
+                raise ApiError("CONFLICT", "Aucune demande de délai en attente.", status.HTTP_409_CONFLICT)
+            decision = request.data.get("decision")
+            if decision not in ("approved", "rejected"):
+                raise ApiError("VALIDATION_ERROR", "Décision inconnue.")
+            comment = str(request.data.get("comment") or "")[:300]
+            req.update(status=decision, decidedBy=user.display_name, decidedAt=now.isoformat(), comment=comment)
+            if decision == "approved":
+                action.due = timezone.datetime.strptime(req["due"], "%Y-%m-%d").date()
+            action.history = hist
+            action.save(update_fields=["history", "due"])
+            note(f"{'✅ Délai accordé' if decision == 'approved' else '✖ Délai refusé'} ({req['due']})" + (f" : {comment}" if comment else ""))
+            from django.contrib.auth import get_user_model
+            tell(get_user_model().objects.filter(pk=req.get("byId")).first(),
+                 f"{'Délai accordé' if decision == 'approved' else 'Délai refusé'} : {action.title}", comment or req["due"])
+            audit.record(user, f"Tâche {action.id}", "Décision sur demande de délai", req["due"], decision, tenant=project.tenant)
+        else:
+            raise ApiError("VALIDATION_ERROR", "Opération inconnue.")
+        return Response(_detail(user, project))
+
+
+
+class ReassignTasksView(APIView):
+    """POST {from, to, tasks?: [ids]} : le chef de projet, le tech lead ou l'administrateur réaffecte une, plusieurs ou
+    toutes les actions ouvertes d'une personne (absente) à un remplaçant de l'équipe."""
+
+    def post(self, request, pk):
+        from configuration.models import Notification
+        user = request.user
+        project = _project(user, pk)
+        rights = _rights(user, project)
+        if not (user.is_app_admin or rights["isPm"] or rights["isTl"]):
+            raise ApiError("FORBIDDEN_PERMISSION", "Réservé au chef de projet, au tech lead et à l'administrateur.", status.HTTP_403_FORBIDDEN)
+        team = {a.user_id: a.user for a in ProjectAccess.objects.filter(project=project, user__is_active=True).select_related("user")}
+        src = get_object_or_404(get_user_model(), pk=request.data.get("from"), tenant=user.tenant)
+        dst = team.get(int(request.data.get("to") or 0))
+        if dst is None:
+            raise ApiError("VALIDATION_ERROR", "Choisissez un remplaçant membre de l'équipe du projet.")
+        if dst.pk == src.pk:
+            raise ApiError("VALIDATION_ERROR", "Le remplaçant doit être une autre personne.")
+        qs = Action.objects.filter(project=project, owner=src).exclude(status="done")
+        ids = request.data.get("tasks")
+        if isinstance(ids, list) and ids:
+            qs = qs.filter(pk__in=[str(x) for x in ids])
+        moved = []
+        now = timezone.now()
+        for a in qs:
+            a.owner = dst
+            a.history = list(a.history or []) + [{"at": now.isoformat(), "text": f"Réaffectée par {user.display_name} : {src.display_name} → {dst.display_name}"}]
+            a.save(update_fields=["owner", "history"])
+            moved.append(a.title)
+        if not moved:
+            raise ApiError("CONFLICT", "Aucune action ouverte à réaffecter.", status.HTTP_409_CONFLICT)
+        Notification.objects.create(user=dst, event="project_alert", title=f"[{project.code}] {len(moved)} action(s) vous sont confiées"[:200],
+                                    body=f"{user.display_name} vous confie les actions de {src.display_name} : {', '.join(moved)[:300]} · {project.id}")
+        if src.pk != user.pk:
+            Notification.objects.create(user=src, event="project_alert", title=f"[{project.code}] {len(moved)} action(s) confiées à {dst.display_name}"[:200],
+                                        body=f"Pendant votre absence, {user.display_name} a confié vos actions à {dst.display_name}. · {project.id}")
+        audit.record(user, f"Projet {project.code}", "Actions réaffectées (remplacement)", src.display_name, f"{dst.display_name} : {len(moved)} action(s)",
+                     tenant=project.tenant)
+        out = _detail(user, project)
+        out["moved"] = len(moved)
+        return Response(out)

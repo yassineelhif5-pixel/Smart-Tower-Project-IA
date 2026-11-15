@@ -33,7 +33,7 @@ const LICENSE_CAPS = ["licenses.view", "sessions.view", "requests.view"];
 /** Écrans accessibles selon le profil. Le serveur revérifie chaque droit : ceci n'adapte que l'affichage. */
 export function routesFor(me: Me): Route[] {
   // Le Pilote n'a jamais accès aux données métier ni aux discussions des entreprises clientes.
-  if (me.isPlatformAdmin) return ["pilote", "acces"];
+  if (me.isPlatformAdmin) return ["pilote", "configuration", "acces"];
   if (me.isSupport) return ["support", "acces"];
   const work: Route[] = [];
   if (me.permissions.project?.[0]) work.push("projets", "reporting");

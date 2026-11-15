@@ -60,7 +60,7 @@ def _time_row(entry, unit, hpd):
             "action": entry.action_id, "actionName": entry.action.title if entry.action else "",
             "user": entry.person_id, "userName": entry.person.display_name, "workDate": entry.work_date,
             "amount": str(amount.quantize(Decimal("0.01"))), "unit": unit,
-            "status": entry.approval_status, "line": entry.line, "approvedBy": entry.approved_by.display_name if entry.approved_by else None,
+            "status": entry.approval_status, "line": entry.line, "rejectReason": entry.reject_reason, "approvedBy": entry.approved_by.display_name if entry.approved_by else None,
             "approvedAt": entry.approved_at}
 
 
@@ -85,10 +85,20 @@ class TimeEntryListView(APIView):
                 scope |= Q(project__in=projects)
             rows = rows.filter(scope).exclude(Q(approval_status="draft") & ~Q(person=user))
         out = []
+        from .timesheet_sheet import line_labels
+        labels = line_labels(user.tenant)
         for entry in rows.order_by("-work_date", "-pk")[:500]:
             row = _time_row(entry, unit, hpd)
-            row["canDecide"] = (entry.approval_status == "pending" and entry.project_id in decidable
-                                and time_approval.can_decide(user, entry))
+            row["projectCode"] = entry.project.code
+            row["lineName"] = labels.get((str(entry.project_id), entry.line), "") if entry.line else ""
+            row["hours"] = str(Decimal(entry.hours).quantize(Decimal("0.01")))
+            ustep = time_approval.user_step(user, entry) if (entry.approval_status == "pending" and entry.project_id in decidable) else None
+            row["canDecide"] = ustep is not None
+            if entry.approval_status == "pending":
+                row["stepLabel"] = time_approval.step_label(entry.project, entry.approval_step)
+                row["early"] = ustep is not None and ustep > entry.approval_step
+                if ustep is None or row["early"]:
+                    row["waitingFor"] = time_approval.waiting_for(entry)
             out.append(row)
         return Response({"unit": unit, "approval": mode, "rows": out})
 
@@ -108,6 +118,12 @@ class TimeEntryListView(APIView):
         action = None
         if request.data.get("action"):
             action = get_object_or_404(Action, pk=request.data["action"], project=project, tenant=request.user.tenant)
+        from .timesheet_sheet import check_day_limit
+        from .models import TimeAbsence
+        day_total = sum((e.hours for e in TimeEntry.objects.filter(person=request.user, work_date=work_date).exclude(approval_status="rejected")), Decimal("0"))
+        day_total += sum((a.hours for a in TimeAbsence.objects.filter(person=request.user, work_date=work_date)), Decimal("0"))
+        if day_total + hours > Decimal(str(hpd)):
+            raise ApiError("VALIDATION_ERROR", f"Le {work_date:%d/%m} dépasserait le temps autorisé par jour ({hpd} h, présence + absences).")
         from .budget_report import check_entry_allowed
         blocked = check_entry_allowed(project, request.user)
         if blocked:
@@ -136,10 +152,27 @@ class TimeEntryDetailView(APIView):
         decision = request.data.get("decision")
         if decision not in {"approved", "rejected"}:
             raise ApiError("VALIDATION_ERROR", "Choisissez valider ou refuser.")
+        reason = str(request.data.get("comment") or "").strip()[:500]
+        if decision == "rejected" and not reason:
+            raise ApiError("VALIDATION_ERROR", "Indiquez le motif du refus : le collaborateur devra corriger puis renvoyer sa saisie.")
+        ustep = time_approval.user_step(request.user, entry)
+        step_label = time_approval.step_label(entry.project, entry.approval_step)
+        if decision == "approved" and ustep is not None and ustep > entry.approval_step:  # validation anticipée
+            step_label = f"{time_approval.step_label(entry.project, ustep)} (anticipée, à la place de : {step_label})"
+            entry.approval_step = ustep
         if decision == "approved":  # étape suivante du workflow du projet, puis client ou validé
             decision, entry.approval_step = time_approval.next_status(entry)
+            entry.reject_reason = ""
+        else:
+            entry.reject_reason, entry.approval_step = reason, 0
         entry.approval_status, entry.approved_by, entry.approved_at = decision, request.user, timezone.now()
-        entry.save(update_fields=["approval_status", "approved_by", "approved_at", "approval_step"])
+        entry.approvals = list(entry.approvals or []) + [{"by": request.user.display_name, "byId": request.user.pk, "at": entry.approved_at.isoformat(),
+                                                          "step": step_label, "decision": "approved" if decision != "rejected" else "rejected"}]
+        entry.save(update_fields=["approval_status", "approved_by", "approved_at", "approval_step", "reject_reason", "approvals"])
+        if decision == "rejected":
+            from .timesheet_reminders import _send
+            _send(entry.person, f"Saisie refusée : {entry.project.name} du {entry.work_date:%d/%m}",
+                  f"{request.user.display_name} a refusé votre saisie. Motif : {reason}. Corrigez-la dans votre feuille de temps puis renvoyez-la en validation.")
         delegated = not request.user.is_app_admin and request.user.id not in time_approval.base_approvers(
             entry.project, time_approval.approval_mode(request.user.tenant))
         audit.record(request.user, f"Saisie de temps · {entry.project.name}",

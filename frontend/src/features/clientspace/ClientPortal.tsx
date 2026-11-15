@@ -8,7 +8,7 @@ import { ErrorNotice, Field, Loading, Pill, useAction } from "../../components/u
 
 type Num = string | number;
 const n = (v: Num | null | undefined) => Number(v ?? 0);
-const eur = (v: Num | null | undefined) => n(v).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+const eur = (v: Num | null | undefined) => (v === null || v === undefined ? "—" : n(v).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }));
 const fmt = (v: Num) => { const x = n(v); return Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/0$/, "").replace(".", ","); };
 const ST: Record<string, [string, "ok" | "warn" | "crit" | "info" | ""]> = {
   approved: ["Validé", "ok"], client: ["À valider par vous", "warn"], pending: ["En validation interne", "info"], rejected: ["Refusé", "crit"],
