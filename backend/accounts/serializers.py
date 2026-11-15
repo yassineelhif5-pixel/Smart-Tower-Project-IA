@@ -20,6 +20,14 @@ def _tenants(user):
         return []
 
 
+def _onboarding(user):
+    try:
+        from .signup import onboarding_state
+        return onboarding_state(user)
+    except Exception:  # noqa: BLE001 — table pas encore migrée
+        return None
+
+
 class MeSerializer(serializers.Serializer):
     """Profil de l'utilisateur connecté : ce que l'interface a besoin de savoir, rien de plus."""
 
@@ -48,6 +56,7 @@ class MeSerializer(serializers.Serializer):
             "permissions": permissions_of(user.role_id, user.tenant) if role else {},
             "capabilities": capabilities_of(user) if user.tenant_id else [],
             "tenants": _tenants(user),
+            "onboarding": _onboarding(user),
         }
 
 

@@ -120,3 +120,12 @@ def action_after(sender, instance, created, **kwargs):
                      project=p, details=base, link=link, actor=actor)
     except Exception:  # noqa: BLE001
         logger.warning("Notification d'action impossible", exc_info=True)
+
+
+@receiver(pre_save, sender="projects.Project", dispatch_uid="projects.demo_project_limit")
+def _demo_project_limit(sender, instance, raw=False, **kwargs):
+    """Tenant de démonstration : nombre de projets limité (2 par défaut)."""
+    if raw or not instance._state.adding or not instance.tenant_id:
+        return
+    from accounts.signup import check_project_limit
+    check_project_limit(instance)

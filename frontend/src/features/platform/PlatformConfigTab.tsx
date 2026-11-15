@@ -6,6 +6,7 @@ import { useApi } from "../../api/useApi";
 import { Card, useAction } from "../../components/ui";
 import { DeliveryLog, type DeliveryData } from "../notifications/DeliveryLog";
 import { SmtpTestPanel } from "../notifications/SmtpTestPanel";
+import { GoogleConfigCard } from "./GoogleConfigCard";
 
 type Smtp = { host: string; port: number; security: string; username: string; from_address: string; passwordSet: boolean; configured: boolean; source: "pilote" | "env"; passwordHint: string };
 type Conf = { appUrl: string; effectiveUrl: string; source: "pilote" | "env" | "localhost"; envUrl: string; localUrl: string; updatedBy: string; updatedAt: string | null; smtp: Smtp; smtpTests: { at: string; ok: boolean; recipient: string; subject: string; error: string }[] };
@@ -41,6 +42,7 @@ export function PlatformConfigTab() {
           {c.updatedBy && ` Dernière modification par ${c.updatedBy}${c.updatedAt ? ` le ${new Date(c.updatedAt).toLocaleString("fr-FR")}` : ""}.`}
         </p>
       </Card>
+      <GoogleConfigCard />
       <Card title="✉️ Serveur SMTP de la plateforme" sub="Envoi des e-mails du Pilote (demandes de licence, relances de contrat). Les entreprises utilisent leur propre SMTP (fiche entreprise › Notifications e-mail).">
         {f && (
           <>

@@ -195,3 +195,46 @@ class UserPhoto(models.Model):
     content = models.BinaryField()
     mime = models.CharField(max_length=40, default="image/jpeg")
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class SignupProfile(models.Model):
+    """Compte créé librement (inscription ou Google) : vérification de l'e-mail et parcours d'accueil."""
+
+    COMPANY, INDIVIDUAL = "company", "individual"
+    KINDS = [(COMPANY, "Entreprise"), (INDIVIDUAL, "Particulier / indépendant")]
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, primary_key=True, on_delete=models.CASCADE, related_name="signup")
+    source = models.CharField(max_length=10, default="password", help_text="password ou google")
+    email_verified = models.BooleanField(default=False)
+    verify_hash = models.CharField(max_length=64, blank=True, db_index=True)
+    verify_sent_at = models.DateTimeField(null=True, blank=True)
+    google_sub = models.CharField(max_length=255, null=True, blank=True, unique=True)
+    profile_done = models.BooleanField(default=False)
+    kind = models.CharField(max_length=12, choices=KINDS, blank=True)
+    phone = models.CharField(max_length=40, blank=True)
+    job_title = models.CharField(max_length=120, blank=True)
+    company_name = models.CharField(max_length=120, blank=True)
+    company_size = models.CharField(max_length=20, blank=True)
+    country = models.CharField(max_length=80, blank=True)
+    demo_tenant = models.ForeignKey("tenants.Tenant", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class TenantJoinRequest(models.Model):
+    """Demande d'un compte libre pour rejoindre une entreprise existante (code secret), validée par son admin ou le Pilote."""
+
+    PENDING, APPROVED, REJECTED, CANCELLED = "pending", "approved", "rejected", "cancelled"
+    STATUSES = [(PENDING, "En attente"), (APPROVED, "Acceptée"), (REJECTED, "Refusée"), (CANCELLED, "Annulée")]
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="join_requests")
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE, related_name="join_requests")
+    message = models.CharField(max_length=500, blank=True)
+    status = models.CharField(max_length=10, choices=STATUSES, default=PENDING)
+    role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    comment = models.CharField(max_length=300, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(fields=["user", "tenant"], condition=models.Q(status="pending"),
+                                               name="uniq_pending_join_request")]

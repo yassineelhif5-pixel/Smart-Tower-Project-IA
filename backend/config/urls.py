@@ -4,6 +4,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from accounts import password_reset, tenant_switch
 from projects import ai_orchestrator, assistant, assistant_questions, excel_import, export_xlsx, mail_report, meeting_minutes, migration_view, planning_view, project_alerts, team_docs, team_structure, workspace
 from accounts import views as auth
+from accounts import signup_views as signup_api
 from projects import excel_access
 from configuration import notif_admin
 from projects import ai_usage, budget_report, notif_jobs, time_workflow_view, timesheet_history, timesheet_report, timesheet_sheet
@@ -37,6 +38,9 @@ admin_patterns = [
     path("client-domains/<int:pk>", client_domains.ClientDomainDetailView.as_view()),
     path("time-settings", conf.TimeTrackingSettingsView.as_view()),
     path("sso/requests", conf.SSOAccessRequestView.as_view()),
+    path("join-requests", signup_api.TenantJoinRequestsView.as_view()),
+    path("join-requests/code", signup_api.TenantJoinRequestsView.as_view()),
+    path("join-requests/<int:pk>", signup_api.TenantJoinRequestsView.as_view()),
     path("sso/requests/<int:pk>", conf.SSOAccessRequestView.as_view()),
     path("access-requests", conf.UserAccessChangeRequestView.as_view()),
     path("access-requests/<int:pk>", conf.UserAccessChangeRequestView.as_view()),
@@ -79,6 +83,10 @@ platform_patterns = [
     path("notifications", notif_admin.PlatformNotificationsView.as_view()),
     path("config", notif_admin.PlatformConfigView.as_view()),
     path("config/smtp", notif_admin.PlatformSmtpView.as_view()),
+    path("config/google", signup_api.PlatformGoogleView.as_view()),
+    path("join-requests", signup_api.PlatformJoinRequestsView.as_view()),
+    path("join-requests/<int:pk>", signup_api.PlatformJoinRequestsView.as_view()),
+    path("tenants/<int:pk>/join-code", signup_api.PlatformTenantJoinCodeView.as_view()),
     path("notifications/test", notif_admin.PlatformTestView.as_view()),
     path("tenants/<int:tenant_id>/notifications", notif_admin.PilotTenantNotificationsView.as_view()),
     path("tenants/<int:tenant_id>/notifications/email", notif_admin.PilotTenantEmailView.as_view()),
@@ -124,6 +132,19 @@ api_patterns = [
     path("auth/login", auth.LoginView.as_view()),
     path("auth/sso/start", auth.SSOStartView.as_view()),
     path("auth/sso/callback", auth.SSOCallbackView.as_view()),
+    path("auth/providers", signup_api.ProvidersView.as_view()),
+    path("auth/signup", signup_api.SignupView.as_view()),
+    path("auth/signup/verify", signup_api.SignupVerifyView.as_view()),
+    path("auth/signup/resend", signup_api.SignupResendView.as_view()),
+    path("auth/google/start", signup_api.GoogleStartView.as_view()),
+    path("auth/google/callback", signup_api.GoogleCallbackView.as_view()),
+    path("auth/onboarding", signup_api.OnboardingView.as_view()),
+    path("auth/onboarding/profile", signup_api.OnboardingProfileView.as_view()),
+    path("auth/onboarding/demo", signup_api.OnboardingDemoView.as_view()),
+    path("auth/onboarding/join", signup_api.OnboardingJoinView.as_view()),
+    path("auth/onboarding/join/<int:pk>/cancel", signup_api.OnboardingJoinView.as_view()),
+    path("auth/onboarding/activate", signup_api.OnboardingActivateView.as_view()),
+    path("auth/onboarding/enter", signup_api.OnboardingEnterView.as_view()),
     path("auth/logout", auth.LogoutView.as_view()),
     path("auth/me", auth.MeView.as_view()),
     path("auth/tenants", tenant_switch.SwitchTenantView.as_view()),

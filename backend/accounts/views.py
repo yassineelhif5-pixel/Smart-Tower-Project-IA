@@ -83,17 +83,23 @@ class LoginView(APIView):
             audit.record(None, f"Utilisateur {data.validated_data['username'][:60]}", "Connexion refusée", result="failure")
             # Même message que le compte existe ou non.
             raise ApiError("INVALID_CREDENTIALS", "Identifiant ou mot de passe incorrect.", status.HTTP_401_UNAUTHORIZED)
+        from . import signup
+        if signup.email_blocked(user):
+            raise ApiError("EMAIL_NOT_VERIFIED", "Confirmez d'abord votre adresse e-mail : cliquez sur le lien reçu par e-mail.",
+                           status.HTTP_403_FORBIDDEN, details=[{"field": "email", "message": user.email}])
         if user.tenant_id and user.tenant.status != "active":
             audit.record(None, f"Utilisateur {user.username}", "Connexion refusée (organisation inactive)", tenant=user.tenant, result="denied")
             raise TenantInactive()
-        if not (user.tenant_id or user.is_platform_admin or user.is_platform_support):
-            # Compte sans tenant qui n'est pas super administrateur : configuration incohérente, accès refusé.
+        if not (user.tenant_id or user.is_platform_admin or user.is_platform_support or signup.profile_of(user)):
+            # Compte sans tenant qui n'est ni super administrateur ni compte inscrit : configuration incohérente.
             raise ApiError("INVALID_CREDENTIALS", "Identifiant ou mot de passe incorrect.", status.HTTP_401_UNAUTHORIZED)
         login(request, user)
         request.session.save()
         try:
             # Réservation de la licence (nominative ou concurrente), atomique côté serveur.
-            license_services.open_session(user, request.session.session_key)
+            # Compte sans entreprise ou démo expirée : pas de licence, le parcours d'accueil s'affiche.
+            if not signup.demo_expired(user):
+                license_services.open_session(user, request.session.session_key)
         except license_services.LicenseError as exc:
             logout(request)
             audit.record(user, f"Utilisateur {user.username}", "Connexion refusée (licence)", "", exc.code, result="denied")
@@ -113,6 +119,7 @@ class LogoutView(APIView):
 
 class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated, TenantIsActive, LicenseIsValid]
+    onboarding_safe = True  # démo expirée : le profil reste lisible pour afficher le parcours d'accueil
 
     def get(self, request):
         return Response(MeSerializer(request.user).data)

@@ -3004,3 +3004,26 @@ button.bell-item { width: 100%; text-align: left; border: 0; background: transpa
 .ad-pen label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 600; }
 .ad-pen .ad-over { color: var(--crit); font-weight: 700; align-self: end; }
 .ad-pen-btns { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ---------- Inscription et parcours d'accueil ---------- */
+.auth-signup { text-align: center; font-size: 14px; }
+.onboarding-card { max-width: 820px !important; width: 100%; }
+.onb-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.onb-choice { position: relative; border: 1px solid var(--line, #e2e8f0); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 10px; background: var(--card, #fff); }
+.onb-choice h3 { margin: 0; font-size: 17px; }
+.onb-choice ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 14px; }
+.onb-choice.recommended { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .12); }
+.onb-choice.disabled { opacity: .65; }
+.onb-badge { position: absolute; top: -10px; right: 14px; background: linear-gradient(90deg, #6366f1, #a855f7); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.onb-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.onb-kind { text-align: left; border: 1px solid var(--line, #e2e8f0); border-radius: 12px; padding: 12px 14px; background: var(--card, #fff); display: flex; flex-direction: column; gap: 3px; cursor: pointer; color: inherit; font: inherit; }
+.onb-kind.on { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+.onb-requests { display: flex; flex-direction: column; gap: 8px; }
+.onb-request { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 10px 12px; }
+.onb-sep { display: flex; align-items: center; gap: 10px; color: var(--muted, #64748b); font-size: 13px; }
+.onb-sep::before, .onb-sep::after { content: ""; flex: 1; border-top: 1px solid var(--line, #e2e8f0); }
+.onb-offers { display: grid; gap: 8px; }
+.onb-offer { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+.onb-offer.on { border-color: #6366f1; }
+.demo-banner { margin: 0 0 12px; padding: 8px 14px; border-radius: 10px; font-size: 13px; background: linear-gradient(90deg, rgba(99, 102, 241, .12), rgba(168, 85, 247, .12)); border: 1px solid rgba(99, 102, 241, .3); }
+.join-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; letter-spacing: 2px; padding: 4px 10px; border-radius: 8px; background: var(--bg-soft, #f1f5f9); }

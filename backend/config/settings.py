@@ -157,7 +157,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
-    "DEFAULT_THROTTLE_RATES": {"login": "10/min", "voucher_redeem": "5/min", "sso_start": "10/min", "password_reset": "5/min"},
+    "DEFAULT_THROTTLE_RATES": {"login": "10/min", "voucher_redeem": "5/min", "sso_start": "10/min", "password_reset": "5/min", "signup": "5/min"},
     "UNAUTHENTICATED_USER": "django.contrib.auth.models.AnonymousUser",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }

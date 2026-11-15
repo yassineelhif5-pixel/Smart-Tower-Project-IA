@@ -84,7 +84,7 @@ export async function request<T>(method: string, path: string, body?: unknown): 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new ApiError(response.status, data as Partial<ApiErrorBody>);
-    if (response.status === 401 || error.code === "PASSWORD_CHANGE_REQUIRED") {
+    if (response.status === 401 || error.code === "PASSWORD_CHANGE_REQUIRED" || error.code === "DEMO_EXPIRED") {
       sessionListeners.forEach((listener) => listener(error));
     }
     throw error;

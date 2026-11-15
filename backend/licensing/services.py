@@ -140,6 +140,8 @@ def create_subscription(*, by, tenant, version, start_date=None, end_date=None, 
     for kind, qty in ((L.NAMED, version.named_licenses), (L.CONCURRENT, version.concurrent_licenses)):
         if qty:
             allocate(by=by, tenant=tenant, kind=kind, delta=qty, reason=f"Stock initial de l'offre {version}", subscription=sub)
+    from accounts.signup import end_demo_if_needed
+    end_demo_if_needed(tenant, version)
     return sub
 
 
@@ -189,6 +191,8 @@ def activate_offer(*, by, tenant, version, reason="Changement d'offre", features
         allocate(by=by, tenant=tenant, kind=L.CONCURRENT, delta=version.concurrent_licenses,
                  reason=f"Stock initial de l'offre {version}", subscription=sub)
     audit.record(by, f"Abonnement {version}", "Offre activée", "", f"du {start} au {end_date or 'sans terme'}", tenant=tenant)
+    from accounts.signup import end_demo_if_needed
+    end_demo_if_needed(tenant, version)
     return sub
 
 

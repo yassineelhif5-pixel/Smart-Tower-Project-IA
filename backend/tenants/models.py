@@ -42,6 +42,9 @@ class Tenant(models.Model):
     status_reason = models.CharField(max_length=300, blank=True)
     status_changed_at = models.DateTimeField(null=True, blank=True)
     language = models.CharField(max_length=5, default="fr", help_text="Langue par défaut du tenant")
+    join_code = models.CharField(max_length=20, unique=True, null=True, blank=True,
+                                 help_text="Code secret pour demander à rejoindre l'entreprise")
+    demo_until = models.DateField(null=True, blank=True, help_text="Tenant de démonstration : dernier jour d'accès")
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
                                    related_name="+")

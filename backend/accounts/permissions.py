@@ -100,6 +100,11 @@ class LicenseIsValid(BasePermission):
         if getattr(user, "pilot_mode", False):  # Pilote dans Configuration : ne consomme ni ne libère de licence
             return True
         from licensing import services
+        from . import signup
+        if signup.demo_expired(user):
+            if getattr(view, "onboarding_safe", False):
+                return True
+            raise ApiError("DEMO_EXPIRED", "Votre démo est terminée : activez une licence ou rejoignez une entreprise.", 403)
         if not services.is_enforced(user.tenant):
             return True
         problem = services.subscription_problem(user.tenant)

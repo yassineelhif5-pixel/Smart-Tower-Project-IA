@@ -27,6 +27,60 @@ export interface Me {
   permissions: Record<string, Flags>;
   capabilities: string[];
   tenants?: { id: number; slug: string; name: string; current: boolean; role: string | null; active: boolean; reason?: string | null }[];
+  onboarding?: Onboarding | null;
+}
+
+export interface DemoState {
+  tenant: string;
+  until: string;
+  expired: boolean;
+  daysLeft: number;
+  maxProjects: number;
+  projects: number;
+}
+
+export interface JoinRequestRow {
+  id: number;
+  tenant: string;
+  tenantId: number;
+  status: "pending" | "approved" | "rejected" | "cancelled";
+  message: string;
+  comment: string;
+  createdAt: string;
+  decidedAt: string | null;
+  role: string | null;
+  user?: string;
+  email?: string;
+  kind?: string;
+  company?: string;
+  phone?: string;
+  jobTitle?: string;
+  decidedBy?: string | null;
+  roles?: { code: string; label: string }[];
+}
+
+export interface Onboarding {
+  required: boolean;
+  reason: "no_tenant" | "demo_expired" | null;
+  step: "profile" | "choice" | "pending" | "demo_expired" | null;
+  source: "password" | "google" | null;
+  hasHadDemo: boolean;
+  isDemoAdmin: boolean;
+  profile: {
+    kind: "" | "company" | "individual";
+    phone: string;
+    jobTitle: string;
+    companyName: string;
+    companySize: string;
+    country: string;
+    done: boolean;
+    firstName: string;
+    lastName: string;
+  } | null;
+  demo: DemoState | null;
+  joinRequests: JoinRequestRow[];
+  offers?: { id: number; offer: string; description: string; version: number; price: string | null; currency: string; period: string; maxUsers: number | null }[];
+  licenseRequest?: { id: number; status: string; statusLabel: string; offer: string; createdAt: string } | null;
 }
 
 export interface AdminUser {

@@ -10,6 +10,8 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MyAccessPage } from "./pages/MyAccessPage";
+import { DemoBanner, OnboardingPage } from "./pages/OnboardingPage";
+import { JoinRequestsPanel } from "./features/configuration/JoinRequestsPanel";
 import { SSORequestsPanel } from "./features/configuration/SSORequestsPanel";
 import { AccessChangeRequestsPanel } from "./features/configuration/AccessChangeRequestsPanel";
 import { ProjectsPage } from "./pages/ProjectsPage";
@@ -110,11 +112,15 @@ export function App() {
       <ChangePasswordPage me={me} onDone={(next) => setSession({ status: "ready", me: next })} onLogout={logout} />
     );
 
+  if (me.onboarding?.required)
+    return <OnboardingPage me={me} onDone={(next) => setSession({ status: "ready", me: next })} onLogout={logout} />;
+
   const allowed = routesFor(me);
   void hash; // relit la route à chaque changement d'ancre
   const route = routeFromHash(allowed);
   return (
     <Shell me={me} onLogout={logout} routes={allowed} route={route}>
+      <DemoBanner me={me} />
       {route === "pilote" && <PilotPage />}
       <Suspense fallback={<Loading />}>
         {route === "pilotage" && <MethodologyPage me={me} />}
@@ -122,7 +128,7 @@ export function App() {
         {route === "collaboration" && <CollaborationPage me={me} />}
       </Suspense>
       {route === "configuration" && <ConfigurationPage me={me} />}
-      {route === "sso-requests" && <div className="page"><PageHead eyebrow={me.tenant?.name ?? ""} title="Demandes d’accès" sub="Vérifiez les demandes de connexion SSO et attribuez un profil adapté." /><SSORequestsPanel /></div>}
+      {route === "sso-requests" && <div className="page"><PageHead eyebrow={me.tenant?.name ?? ""} title="Demandes d’accès" sub="Demandes d’adhésion (code entreprise) et demandes de connexion SSO : attribuez un profil adapté." /><JoinRequestsPanel /><SSORequestsPanel /></div>}
       {route === "access-requests" && <div className="page"><PageHead eyebrow={me.tenant?.name ?? ""} title="Changements d’accès" sub="Demandez une modification de profil à l’administrateur de votre entreprise." /><AccessChangeRequestsPanel me={me} /></div>}
       {route === "projets" && <ProjectsPage me={me} />}
       {route === "reporting" && <ReportingPage me={me} />}

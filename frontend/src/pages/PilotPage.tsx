@@ -15,10 +15,11 @@ import { PilotUsersTab } from "../features/platform/PilotUsersTab";
 import { ContractsTab } from "../features/platform/ContractsTab";
 import { MaintenanceTab } from "../features/platform/MaintenanceTab";
 import { PlatformConfigTab } from "../features/platform/PlatformConfigTab";
+import { PilotJoinRequests } from "../features/platform/PilotJoinRequests";
 import { SaaSReportPanel } from "../features/configuration/SaaSReportPanel";
 import { AssistantPilotTab } from "../features/assistant/AssistantSettings";
 
-type Tab = "dashboard" | "tenants" | "contracts" | "users" | "offers" | "requests" | "vouchers" | "domains" | "connectors" | "maintenance" | "audit" | "database" | "saas" | "assistants" | "config";
+type Tab = "dashboard" | "tenants" | "contracts" | "users" | "offers" | "requests" | "vouchers" | "domains" | "connectors" | "maintenance" | "audit" | "database" | "saas" | "assistants" | "config" | "joins";
 const TABS: [Tab, string][] = [
   ["dashboard", "Tableau de bord"],
   ["saas", "État SaaS"],
@@ -27,6 +28,7 @@ const TABS: [Tab, string][] = [
   ["users", "Utilisateurs"],
   ["offers", "Offres"],
   ["requests", "Demandes"],
+  ["joins", "Adhésions"],
   ["vouchers", "Vouchers"],
   ["domains", "Domaines SSO"],
   ["connectors", "Connecteurs (client / projet)"],
@@ -108,6 +110,7 @@ export function PilotPage() {
         {tab === "users" && <PilotUsersTab />}
         {tab === "offers" && <OffersTab />}
         {tab === "requests" && <RequestsTab />}
+        {tab === "joins" && <PilotJoinRequests />}
         {tab === "vouchers" && <VouchersTab />}
         {tab === "domains" && <DomainsTab />}
         {tab === "connectors" && <ConnectorAssignmentsTab />}

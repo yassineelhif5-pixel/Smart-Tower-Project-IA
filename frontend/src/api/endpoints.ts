@@ -33,6 +33,7 @@ import type {
   Endpoint,
   Flags,
   Me,
+  Onboarding,
   NotificationSettings,
   RolesResponse,
   SSOSettings,
@@ -59,6 +60,22 @@ export const authApi = {
   forgotPassword: (identifier: string) => api.post<{ detail: string }>("/auth/password/forgot", { identifier }),
   resetPassword: (uid: string, token: string, new_password: string) =>
     api.post<{ detail: string; confirmed?: boolean; username?: string }>("/auth/password/reset", { uid, token, new_password }),
+};
+
+export type OnboardingResponse = { onboarding: Onboarding; me: Me; result?: { activated?: boolean; requested?: boolean } };
+export const signupApi = {
+  providers: () => api.get<{ google: boolean; signup: boolean }>("/auth/providers"),
+  signup: (body: { firstName: string; lastName: string; email: string; password: string; acceptTerms: boolean }) =>
+    api.post<{ detail: string; email: string }>("/auth/signup", body),
+  resend: (email: string) => api.post<{ detail: string }>("/auth/signup/resend", { email }),
+  state: () => api.get<OnboardingResponse>("/auth/onboarding"),
+  profile: (body: Record<string, string>) => api.post<OnboardingResponse>("/auth/onboarding/profile", body),
+  demo: () => api.post<OnboardingResponse>("/auth/onboarding/demo"),
+  join: (code: string, message: string) => api.post<OnboardingResponse>("/auth/onboarding/join", { code, message }),
+  cancelJoin: (id: number) => api.post<OnboardingResponse>(`/auth/onboarding/join/${id}/cancel`),
+  activate: (body: { mode: "voucher"; code: string } | { mode: "request"; versionId: number; justification: string }) =>
+    api.post<OnboardingResponse>("/auth/onboarding/activate", body),
+  enter: () => api.post<OnboardingResponse>("/auth/onboarding/enter"),
 };
 
 export const timeApi = {
