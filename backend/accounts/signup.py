@@ -223,12 +223,14 @@ def start_demo(user):
                        status.HTTP_409_CONFLICT)
     if user.tenant_id:
         raise ApiError("VALIDATION_ERROR", "Votre compte est déjà rattaché à une entreprise.", status.HTTP_409_CONFLICT)
-    base = f"demo-{slugify(user.username.replace('@', '-at-'))}"[:50].rstrip("-") or "demo"
+    # Le slug sert aussi de préfixe aux numéros de licence (40 caractères max.) : on le garde court.
+    login_id = slugify(user.username.split("@", 1)[0]) or str(user.pk)
+    base = f"demo-{login_id}"[:28].rstrip("-") or "demo"
     slug, n = base, 1
     while Tenant.objects.filter(slug=slug).exists():
         n += 1
         tail = f"-{n}"
-        slug = base[:50 - len(tail)] + tail
+        slug = base[:28 - len(tail)] + tail
     version = demo_version()
     label = profile.company_name if profile.kind == SignupProfile.COMPANY and profile.company_name else user.display_name
     tenant = Tenant.objects.create(slug=slug, name=f"Démo · {label}"[:120], created_by=user,
