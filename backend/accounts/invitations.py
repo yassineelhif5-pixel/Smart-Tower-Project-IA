@@ -141,9 +141,13 @@ def _email(inv, link):
     return subject, text, html
 
 
-def _send(inv, token, base_url):
-    from configuration.mailer import send_mail
-    link = f"{base_url.rstrip('/')}/?invite={token}"
+def _send(inv, token, base_url=""):
+    from configuration.mailer import app_url, send_mail
+    # Adresse publique de l'application (Pilote › Configuration ou APP_PUBLIC_URL), jamais celle du poste
+    # qui envoie : une invitation envoyée depuis un environnement local doit pointer vers le site en ligne.
+    public = app_url()
+    base = public if public and "localhost" not in public and "127.0.0.1" not in public else base_url
+    link = f"{base.rstrip('/')}/?invite={token}"
     subject, text, html = _email(inv, link)
     res = send_mail(None, [inv.email], subject, text, html, event="invitation", wait=True)
     inv.sent_at = timezone.now()
