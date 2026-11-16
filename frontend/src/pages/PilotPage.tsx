@@ -28,7 +28,7 @@ const TABS: [Tab, string][] = [
   ["users", "Utilisateurs"],
   ["offers", "Offres"],
   ["requests", "Demandes"],
-  ["joins", "Adhésions"],
+  ["joins", "Invitations & adhésions"],
   ["vouchers", "Vouchers"],
   ["domains", "Domaines SSO"],
   ["connectors", "Connecteurs (client / projet)"],

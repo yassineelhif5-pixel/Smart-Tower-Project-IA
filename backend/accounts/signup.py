@@ -92,13 +92,19 @@ def unique_username(email):
     return candidate
 
 
-def register(*, email, password, first_name, last_name):
-    """Crée un compte (sans entreprise) et envoie le lien de confirmation. Ne révèle pas si l'adresse existe déjà."""
+def register(*, email, password, first_name, last_name, invite_token=""):
+    """Crée un compte (sans entreprise) et envoie le lien de confirmation. Ne révèle pas si l'adresse existe déjà.
+
+    Avec un lien d'invitation valide pour cette adresse, le compte est confirmé d'office (renvoie l'utilisateur)."""
     from .serializers import validate_new_password
     email = normalize_email(email)
     first_name, last_name = str(first_name or "").strip()[:150], str(last_name or "").strip()[:150]
     if not first_name or not last_name:
         raise ApiError("VALIDATION_ERROR", "Indiquez votre prénom et votre nom.")
+    from . import invitations
+    invitation = invitations.find(invite_token) if invite_token else None
+    if invitation is not None and invitation.email.lower() != email:
+        raise ApiError("VALIDATION_ERROR", f"Cette invitation est réservée à {invitation.email}.")
     existing = User.objects.filter(Q(email__iexact=email) | Q(username__iexact=email)).first()
     if existing is not None:
         profile = SignupProfile.objects.filter(user=existing).first()
@@ -119,6 +125,9 @@ def register(*, email, password, first_name, last_name):
             profile = SignupProfile.objects.create(user=user, source="password")
     except IntegrityError:
         return
+    if invitation is not None and invitations.accept(invitation, user):
+        audit.record(None, f"Utilisateur {user.username}", "Inscription sur invitation", tenant=None)
+        return user
     audit.record(None, f"Utilisateur {user.username}", "Inscription", "", "en attente de confirmation de l'e-mail", tenant=None)
     send_verification(profile)
 

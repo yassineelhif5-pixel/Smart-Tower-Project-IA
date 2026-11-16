@@ -4,7 +4,7 @@ import { Copyright } from "../components/Copyright";
 import { ApiError } from "../api/client";
 import { API_BASE } from "../api/client";
 import { authApi, signupApi } from "../api/endpoints";
-import { GoogleIcon, SignupForm } from "./SignupForm";
+import { GoogleIcon, SignupForm, type InviteInfo } from "./SignupForm";
 import { Field } from "../components/ui";
 import { PrefsSwitcher, usePrefs } from "../i18n";
 import { ForgotPasswordForm, ResetPasswordForm } from "./ForgotPassword";
@@ -86,10 +86,24 @@ export function LoginPage({ onLogged }: { onLogged: (me: Me) => void }) {
   const [providers, setProviders] = useState<{ google: boolean; signup: boolean }>({ google: false, signup: true });
   const [unverified, setUnverified] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
+  const inviteToken = params.get("invite") || "";
+  const [invite, setInvite] = useState<InviteInfo | null>(null);
+  const [inviteError, setInviteError] = useState(false);
   useEffect(() => {
     signupApi.providers().then(setProviders, () => undefined);
+    if (inviteToken) {
+      signupApi.invitation(inviteToken).then((r) => {
+        if (r.valid && r.email) {
+          setInvite({ token: inviteToken, email: r.email, tenant: r.tenant, invitedBy: r.invitedBy, message: r.message });
+          try { sessionStorage.setItem("pct.invite", inviteToken); } catch { /* stockage indisponible */ }
+          setMode("signup");
+        } else setInviteError(true);
+      }, () => setInviteError(true));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const startGoogle = () => window.location.assign(`${API_BASE}/auth/google/start`);
+  const startGoogle = () =>
+    window.location.assign(`${API_BASE}/auth/google/start${invite ? `?invite=${encodeURIComponent(invite.token)}` : ""}`);
 
   const [passwordOk, setPasswordOk] = useState<string | null>(null);
   const backToLogin = () => {
@@ -141,8 +155,10 @@ export function LoginPage({ onLogged }: { onLogged: (me: Me) => void }) {
   }
   if (mode === "signup") {
     return (
-      <AuthLayout title="Créer un compte" sub="Inscrivez-vous gratuitement : démo de 3 jours ou accès à votre entreprise.">
-        <SignupForm onBack={() => setMode("login")} google={providers.google} onGoogle={startGoogle} />
+      <AuthLayout title={invite ? "Accepter l’invitation" : "Créer un compte"}
+        sub={invite ? "Créez votre compte Control Tower en quelques secondes." : "Inscrivez-vous gratuitement : démo de 3 jours ou accès à votre entreprise."}>
+        <SignupForm onBack={() => setMode("login")} google={providers.google} onGoogle={startGoogle} invite={invite} />
+        {invite && <p className="muted" style={{ fontSize: 12, textAlign: "center", margin: "10px 0 0" }}>Vous avez déjà un compte avec {invite.email} ? Connectez-vous : l’invitation sera acceptée automatiquement.</p>}
       </AuthLayout>
     );
   }
@@ -172,6 +188,11 @@ export function LoginPage({ onLogged }: { onLogged: (me: Me) => void }) {
         <div className="callout warn" role="alert" style={{ marginBottom: 14 }}>
           <b>Lien de confirmation invalide ou expiré.</b>
           <div>Connectez-vous pour recevoir un nouveau lien, ou recréez votre compte.</div>
+        </div>
+      )}
+      {inviteError && (
+        <div className="callout warn" role="alert" style={{ marginBottom: 14 }}>
+          Ce lien d’invitation n’est plus valide (expiré, déjà utilisé ou révoqué). Demandez une nouvelle invitation ou créez votre compte.
         </div>
       )}
       {googleState && (

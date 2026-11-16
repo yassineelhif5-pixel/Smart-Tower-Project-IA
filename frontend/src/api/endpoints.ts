@@ -65,8 +65,11 @@ export const authApi = {
 export type OnboardingResponse = { onboarding: Onboarding; me: Me; result?: { activated?: boolean; requested?: boolean } };
 export const signupApi = {
   providers: () => api.get<{ google: boolean; signup: boolean }>("/auth/providers"),
-  signup: (body: { firstName: string; lastName: string; email: string; password: string; acceptTerms: boolean }) =>
-    api.post<{ detail: string; email: string }>("/auth/signup", body),
+  signup: (body: { firstName: string; lastName: string; email: string; password: string; acceptTerms: boolean; invite?: string }) =>
+    api.post<{ detail: string; email: string; loggedIn?: boolean }>("/auth/signup", body),
+  invitation: (token: string) =>
+    api.get<{ valid: boolean; email?: string; tenant?: string | null; invitedBy?: string; message?: string }>(`/auth/invitation?token=${encodeURIComponent(token)}`),
+  acceptInvite: (token: string) => api.post<OnboardingResponse>("/auth/invitation/accept", { token }),
   resend: (email: string) => api.post<{ detail: string }>("/auth/signup/resend", { email }),
   state: () => api.get<OnboardingResponse>("/auth/onboarding"),
   profile: (body: Record<string, string>) => api.post<OnboardingResponse>("/auth/onboarding/profile", body),

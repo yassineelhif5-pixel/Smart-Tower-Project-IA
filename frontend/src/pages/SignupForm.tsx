@@ -11,8 +11,10 @@ export function GoogleIcon() {
   );
 }
 
-export function SignupForm({ onBack, google, onGoogle }: { onBack: () => void; google: boolean; onGoogle: () => void }) {
-  const [f, setF] = useState({ firstName: "", lastName: "", email: "", password: "", confirm: "", accept: false });
+export type InviteInfo = { token: string; email: string; tenant?: string | null; invitedBy?: string; message?: string };
+
+export function SignupForm({ onBack, google, onGoogle, invite }: { onBack: () => void; google: boolean; onGoogle: () => void; invite?: InviteInfo | null }) {
+  const [f, setF] = useState({ firstName: "", lastName: "", email: invite?.email ?? "", password: "", confirm: "", accept: false });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<string | null>(null);
@@ -28,7 +30,12 @@ export function SignupForm({ onBack, google, onGoogle }: { onBack: () => void; g
     setBusy(true);
     setErrors({});
     try {
-      const r = await signupApi.signup({ firstName: f.firstName.trim(), lastName: f.lastName.trim(), email: f.email.trim(), password: f.password, acceptTerms: f.accept });
+      const r = await signupApi.signup({ firstName: f.firstName.trim(), lastName: f.lastName.trim(), email: f.email.trim(), password: f.password, acceptTerms: f.accept, invite: invite?.token });
+      if (r.loggedIn) {
+        try { sessionStorage.removeItem("pct.invite"); } catch { /* stockage indisponible */ }
+        window.location.assign("/");
+        return;
+      }
       setSent(r.email);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -56,6 +63,13 @@ export function SignupForm({ onBack, google, onGoogle }: { onBack: () => void; g
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {invite && (
+        <div className="callout ok" style={{ display: "block" }}>
+          <b>🎉 {invite.invitedBy} vous invite{invite.tenant ? ` à rejoindre ${invite.tenant}` : ""}.</b>
+          {invite.message && <div style={{ fontStyle: "italic", marginTop: 4 }}>« {invite.message} »</div>}
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>Créez votre compte avec {invite.email} : il sera activé immédiatement.</div>
+        </div>
+      )}
       {google && (
         <>
           <button className="btn sso-btn" type="button" onClick={onGoogle}>
@@ -75,7 +89,7 @@ export function SignupForm({ onBack, google, onGoogle }: { onBack: () => void; g
           </Field>
         </div>
         <Field id="su-email" label="Adresse e-mail" error={errors.email} hint="Elle servira d’identifiant de connexion.">
-          <input id="su-email" className="inp" type="email" autoComplete="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} required />
+          <input id="su-email" className="inp" type="email" autoComplete="email" value={f.email} readOnly={!!invite} onChange={(e) => setF({ ...f, email: e.target.value })} required />
         </Field>
         <Field id="su-pass" label="Mot de passe" error={errors.password} hint="10 caractères minimum, pas uniquement des chiffres.">
           <div className="password-field">

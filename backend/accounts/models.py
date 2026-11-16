@@ -238,3 +238,23 @@ class TenantJoinRequest(models.Model):
         ordering = ["-created_at"]
         constraints = [models.UniqueConstraint(fields=["user", "tenant"], condition=models.Q(status="pending"),
                                                name="uniq_pending_join_request")]
+
+
+class Invitation(models.Model):
+    """Invitation envoyée par le Pilote ou un administrateur pour créer un compte (éventuellement dans une entreprise)."""
+
+    email = models.EmailField()
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE, null=True, blank=True, related_name="invitations")
+    role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    message = models.CharField(max_length=1000, blank=True)
+    token_hash = models.CharField(max_length=64, unique=True)
+    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    accepted_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

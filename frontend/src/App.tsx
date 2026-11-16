@@ -2,7 +2,7 @@ import { ClientSpacePage } from "./features/clientspace/ClientSpacePage";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { ApiError, onSessionProblem } from "./api/client";
-import { authApi } from "./api/endpoints";
+import { authApi, signupApi } from "./api/endpoints";
 import { Shell } from "./components/Shell";
 import { ErrorNotice, Loading, PageHead } from "./components/ui";
 import { LicensesTab } from "./features/licensing/LicensesTab";
@@ -12,6 +12,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MyAccessPage } from "./pages/MyAccessPage";
 import { ActivationPage, DemoBanner, OnboardingPage } from "./pages/OnboardingPage";
 import { JoinRequestsPanel } from "./features/configuration/JoinRequestsPanel";
+import { InvitePanel } from "./features/configuration/InvitePanel";
 import { PaymentReturn } from "./features/licensing/PaymentPanel";
 import { SSORequestsPanel } from "./features/configuration/SSORequestsPanel";
 import { AccessChangeRequestsPanel } from "./features/configuration/AccessChangeRequestsPanel";
@@ -90,6 +91,18 @@ export function App() {
     return onSessionProblem((e) => (e.status === 401 ? setSession({ status: "anonymous" }) : refresh()));
   }, [refresh]);
 
+  // Invitation reçue par e-mail puis connexion avec un compte existant : on l'accepte automatiquement.
+  const ready = session.status === "ready";
+  useEffect(() => {
+    if (!ready) return;
+    let token = "";
+    try {
+      token = sessionStorage.getItem("pct.invite") || "";
+      sessionStorage.removeItem("pct.invite");
+    } catch { /* stockage indisponible */ }
+    if (token) signupApi.acceptInvite(token).then(() => refresh(), () => undefined);
+  }, [ready, refresh]);
+
   const logout = useCallback(() => {
     authApi.logout().finally(() => setSession({ status: "anonymous" }));
   }, []);
@@ -132,7 +145,7 @@ export function App() {
         {route === "collaboration" && <CollaborationPage me={me} />}
       </Suspense>
       {route === "configuration" && <ConfigurationPage me={me} />}
-      {route === "sso-requests" && <div className="page"><PageHead eyebrow={me.tenant?.name ?? ""} title="Demandes d’accès" sub="Demandes d’adhésion (code entreprise) et demandes de connexion SSO : attribuez un profil adapté." /><JoinRequestsPanel /><SSORequestsPanel /></div>}
+      {route === "sso-requests" && <div className="page"><PageHead eyebrow={me.tenant?.name ?? ""} title="Demandes d’accès" sub="Invitez des personnes, traitez les demandes d’adhésion (code entreprise) et les demandes de connexion SSO." /><div style={{ marginBottom: 14 }}><InvitePanel /></div><JoinRequestsPanel /><SSORequestsPanel /></div>}
       {route === "access-requests" && <div className="page"><PageHead eyebrow={me.tenant?.name ?? ""} title="Changements d’accès" sub="Demandez une modification de profil à l’administrateur de votre entreprise." /><AccessChangeRequestsPanel me={me} /></div>}
       {route === "projets" && <ProjectsPage me={me} />}
       {route === "reporting" && <ReportingPage me={me} />}

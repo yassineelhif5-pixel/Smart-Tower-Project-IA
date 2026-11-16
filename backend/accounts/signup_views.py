@@ -51,8 +51,17 @@ class SignupView(APIView):
         d = request.data or {}
         if not d.get("acceptTerms"):
             raise ApiError("VALIDATION_ERROR", "Acceptez les conditions d'utilisation pour créer votre compte.")
-        signup.register(email=d.get("email"), password=str(d.get("password") or ""),
-                        first_name=d.get("firstName"), last_name=d.get("lastName"))
+        user = signup.register(email=d.get("email"), password=str(d.get("password") or ""),
+                               first_name=d.get("firstName"), last_name=d.get("lastName"), invite_token=d.get("invite", ""))
+        if user is not None:
+            # Invitation : l'adresse est prouvée par le lien reçu, la session s'ouvre directement.
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+            request.session.save()
+            try:
+                open_license_session(request, user)
+            except license_services.LicenseError:
+                pass
+            return Response({"detail": "Compte créé.", "email": user.email, "loggedIn": True}, status=status.HTTP_201_CREATED)
         return Response({"detail": "Si l'adresse est valide, un e-mail de confirmation vient d'être envoyé.",
                          "email": str(d.get("email") or "").strip().lower()}, status=status.HTTP_201_CREATED)
 
@@ -98,6 +107,9 @@ class GoogleStartView(APIView):
     def get(self, request):
         from .google_oauth import begin
         from .sso import SSOError
+        token = request.query_params.get("invite", "")
+        if token:
+            request.session["pct_invite"] = token[:100]
         try:
             return HttpResponseRedirect(begin(request))
         except (SSOError, ValueError):
@@ -116,6 +128,13 @@ class GoogleCallbackView(APIView):
             user = finish(request, request.query_params.get("code", ""), request.query_params.get("state", ""))
         except (SSOError, ValueError):
             return HttpResponseRedirect("/?google=error")
+        token = request.session.pop("pct_invite", "")
+        if token:
+            from . import invitations
+            inv = invitations.find(token)
+            if inv is not None:
+                invitations.accept(inv, user)
+                user.refresh_from_db()
         if user.tenant_id and user.tenant.status != "active":
             return HttpResponseRedirect("/?sso=unavailable")
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
@@ -326,3 +345,105 @@ class PlatformGoogleView(APIView):
         audit.record(request.user, "Configuration de la plateforme", "Connexion Google modifiée", "",
                      "réinitialisée" if d.get("reset") else ("activée" if v.get("enabled") else "désactivée"), tenant=None)
         return self.get(request)
+
+
+# --------------------------------------------------------------------------- invitations
+def _inviter_tenant(request, data):
+    """Pilote : entreprise facultative (data.tenant) ; admin d'entreprise : la sienne."""
+    from tenants.models import Tenant
+    from .capabilities import has_capability
+    user = request.user
+    if user.is_platform_admin:
+        tid = data.get("tenant")
+        return get_object_or_404(Tenant, pk=tid) if tid not in (None, "", "none") else None
+    if not user.tenant_id or not (user.is_app_admin or has_capability(user, "users.create")):
+        raise ApiError("FORBIDDEN_PERMISSION", "Seuls le Pilote et les administrateurs peuvent inviter des personnes.",
+                       status.HTTP_403_FORBIDDEN)
+    if user.tenant.demo_until and not user.is_app_admin:
+        raise ApiError("FORBIDDEN_PERMISSION", "Invitation réservée à l'administrateur.", status.HTTP_403_FORBIDDEN)
+    return user.tenant
+
+
+class InvitationsView(APIView):
+    """GET : invitations envoyées ; POST {emails, role?, message?, tenant? (Pilote)} : inviter."""
+
+    permission_classes = [permissions.IsAuthenticated, TenantIsActive, PasswordChangeNotRequired]
+
+    def _scope(self, request):
+        from .models import Invitation
+        rows = Invitation.objects.select_related("tenant", "role", "invited_by", "accepted_user")
+        if request.user.is_platform_admin:
+            return rows
+        tenant = _inviter_tenant(request, {})
+        return rows.filter(tenant=tenant)
+
+    def get(self, request):
+        from . import invitations
+        from .signup import assignable_roles
+        rows = self._scope(request)[:300]
+        roles = []
+        if not request.user.is_platform_admin:
+            roles = [{"code": r.code, "label": r.label} for r in assignable_roles(request.user.tenant)]
+        return Response({"invitations": [invitations.row(i) for i in rows], "roles": roles})
+
+    def post(self, request):
+        from . import invitations
+        d = request.data or {}
+        tenant = _inviter_tenant(request, d)
+        result = invitations.invite(by=request.user, emails_raw=d.get("emails", ""), base_url=request.build_absolute_uri("/"),
+                                    tenant=tenant, role_code=d.get("role", ""), message=d.get("message", ""))
+        return Response(result, status=status.HTTP_201_CREATED)
+
+
+class InvitationDetailView(InvitationsView):
+    def post(self, request, pk):
+        from . import invitations
+        inv = get_object_or_404(self._scope(request), pk=pk)
+        return Response(invitations.row(invitations.resend(request.user, inv, request.build_absolute_uri("/"))))
+
+    def delete(self, request, pk):
+        from . import invitations
+        inv = get_object_or_404(self._scope(request), pk=pk)
+        return Response(invitations.row(invitations.revoke(inv)))
+
+
+class InvitationRolesView(APIView):
+    """Pilote : profils proposables pour une entreprise donnée (GET ?tenant=)."""
+
+    permission_classes = [permissions.IsAuthenticated, PasswordChangeNotRequired, IsPlatformAdmin]
+
+    def get(self, request):
+        from tenants.models import Tenant
+        from .signup import assignable_roles
+        t = get_object_or_404(Tenant, pk=request.query_params.get("tenant"))
+        return Response({"roles": [{"code": r.code, "label": r.label} for r in assignable_roles(t)]})
+
+
+class InvitationInfoView(APIView):
+    """GET /auth/invitation?token= (public) : pour préremplir la page d'inscription."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        from . import invitations
+        return Response(invitations.public_info(request.query_params.get("token", "")))
+
+
+class InvitationAcceptView(OnboardingBase):
+    """POST /auth/invitation/accept {token} : un compte existant accepte l'invitation reçue à son adresse."""
+
+    def post(self, request):
+        from . import invitations
+        inv = invitations.find(str((request.data or {}).get("token") or ""))
+        if inv is None:
+            raise ApiError("VALIDATION_ERROR", "Invitation invalide ou expirée.")
+        if inv.email.lower() != (request.user.email or "").lower():
+            raise ApiError("VALIDATION_ERROR", f"Cette invitation est destinée à {inv.email} : connectez-vous avec ce compte.")
+        invitations.accept(inv, request.user)
+        request.user.refresh_from_db()
+        try:
+            open_license_session(request, request.user)
+        except license_services.LicenseError:
+            pass
+        return self.state(request)
