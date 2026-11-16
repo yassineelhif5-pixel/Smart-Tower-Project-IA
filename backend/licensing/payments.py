@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 API = "https://api.stripe.com/v1"
 SETTING_KEY = "stripe"
+CUSTOM_OFFER = "entreprise-sur-mesure"  # abonnement « Entreprise » : nombre de licences au choix
 INTERVALS = {"month": "month", "year": "year", "once": ""}
 INTERVAL_LABEL = {"month": "par mois", "year": "par an", "": "paiement unique"}
 
@@ -173,12 +174,32 @@ def offer_row(v):
             "concurrent": v.concurrent_licenses, "features": v.features or [], "payable": payable}
 
 
+def custom_version(quantity, unit_price, interval):
+    """Version de l'offre « Entreprise (sur mesure) » correspondant au nombre de licences choisi (créée au besoin)."""
+    offer, _ = L.Offer.objects.get_or_create(code=CUSTOM_OFFER, defaults={
+        "name": "Entreprise (sur mesure)", "position": 99,
+        "description": "Abonnement sur mesure : le nombre de licences nominatives de votre choix, tous les modules."})
+    if not offer.is_active:
+        raise ApiError("VALIDATION_ERROR", "L'abonnement sur mesure est désactivé par le Pilote.")
+    period = {"month": "month", "year": "year", "": "once"}[interval]
+    price = (unit_price * quantity).quantize(Decimal("0.01"))
+    version = (L.OfferVersion.objects.filter(offer=offer, is_published=True, named_licenses=quantity, price=price,
+                                             billing_period=period).order_by("-number").first())
+    if version is None:
+        number = (L.OfferVersion.objects.filter(offer=offer).order_by("-number").values_list("number", flat=True).first() or 0) + 1
+        version = L.OfferVersion.objects.create(
+            offer=offer, number=number, is_published=True, price=price, billing_period=period, license_model="named",
+            max_users=quantity, named_licenses=quantity, concurrent_licenses=0, features=[], limits={},
+            conditions=f"Abonnement sur mesure : {quantity} licence(s) nominative(s).")
+    return version
+
+
 def options(tenant, request_obj=None):
     from accounts.signup import DEMO_OFFER
     from . import services as lic
     conf = config()
     sub = lic.current_subscription(tenant)
-    versions = (L.OfferVersion.objects.filter(is_published=True, offer__is_active=True).exclude(offer__code__in=[DEMO_OFFER, "demo"])
+    versions = (L.OfferVersion.objects.filter(is_published=True, offer__is_active=True).exclude(offer__code__in=[DEMO_OFFER, "demo", CUSTOM_OFFER])
                 .select_related("offer").order_by("offer__position", "offer__name", "-number"))
     seen, offers = set(), []
     for v in versions:
@@ -205,7 +226,9 @@ def options(tenant, request_obj=None):
         "offers": offers,
         "licensePrices": {"named": conf["namedPrice"], "concurrent": conf["concurrentPrice"], "interval": interval,
                           "intervalLabel": INTERVAL_LABEL[interval]},
-        "canBuyLicenses": bool(sub) and not (sub and sub.offer_version.offer.code == DEMO_OFFER),
+        "canBuyLicenses": bool(sub) and sub.offer_version.offer.code not in (DEMO_OFFER, CUSTOM_OFFER),
+        "custom": {"available": _dec(conf["namedPrice"]) > 0, "unit": conf["namedPrice"], "interval": interval,
+                   "intervalLabel": INTERVAL_LABEL[interval]},
         "preselect": preselect,
         "request": {"id": request_obj.pk, "status": request_obj.status, "kind": request_obj.get_kind_display()} if request_obj else None,
         "payments": [payment_row(p) for p in recent],
@@ -214,7 +237,8 @@ def options(tenant, request_obj=None):
 
 def payment_row(p):
     return {"id": p.pk, "tenant": p.tenant.name, "kind": p.kind,
-            "label": (f"{p.offer_version.offer.name} v{p.offer_version.number}" if p.offer_version_id
+            "label": (f"Entreprise (sur mesure) · {p.quantity} licence(s)" if p.offer_version_id and p.offer_version.offer.code == CUSTOM_OFFER
+                      else f"{p.offer_version.offer.name} v{p.offer_version.number}" if p.offer_version_id
                       else f"{p.quantity} licence(s) {dict(L.LICENSE_KINDS).get(p.license_kind, '').lower()}(s)"),
             "amount": f"{p.amount / 100:.2f}", "currency": p.currency, "interval": p.interval, "status": p.status,
             "statusLabel": p.get_status_display(), "createdAt": p.created_at, "paidAt": p.paid_at, "appliedAt": p.applied_at,
@@ -234,7 +258,7 @@ def checkout(*, by, tenant, base_url, mode, version_id=None, license_kind="", qu
     currency = conf["currency"]
     if mode == "offer":
         version = L.OfferVersion.objects.select_related("offer").filter(pk=version_id, is_published=True, offer__is_active=True).first()
-        if version is None or version.offer.code in (DEMO_OFFER, "demo"):
+        if version is None or version.offer.code in (DEMO_OFFER, "demo", CUSTOM_OFFER):
             raise ApiError("VALIDATION_ERROR", "Choisissez une offre publiée.")
         if version.price is None or version.price <= 0:
             raise ApiError("VALIDATION_ERROR", "Cette offre est sur devis : elle ne peut pas être payée en ligne. Contactez le Pilote.")
@@ -260,6 +284,21 @@ def checkout(*, by, tenant, base_url, mode, version_id=None, license_kind="", qu
         unit, interval, version = _cents(price), INTERVALS[conf["licenseInterval"]], None
         name = f"Control Tower · licence {'nominative' if license_kind == L.NAMED else 'concurrente'}"
         kind, lkind = "licenses", license_kind
+    elif mode == "custom":
+        try:
+            qty = int(quantity)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty < 1 or qty > 1000:
+            raise ApiError("VALIDATION_ERROR", "Indiquez un nombre de licences entre 1 et 1 000.")
+        price = _dec(conf["namedPrice"])
+        if price <= 0:
+            raise ApiError("VALIDATION_ERROR", "Le prix des licences n'est pas encore défini par le Pilote.")
+        interval = INTERVALS[conf["licenseInterval"]]
+        version = custom_version(qty, price, interval)
+        # Une seule ligne Stripe : quantité × prix unitaire (le total correspond au prix de la version sur mesure).
+        unit, kind, lkind = _cents(price), "offer", L.NAMED
+        name = "Control Tower · Entreprise (sur mesure) · licence nominative"
     else:
         raise ApiError("VALIDATION_ERROR", "Choisissez une offre ou un nombre de licences.")
 

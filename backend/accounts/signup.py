@@ -481,7 +481,7 @@ def save_profile(user, data):
 # --------------------------------------------------------------------------- fin de démo : activation
 def activation_offers():
     from licensing.models import OfferVersion
-    rows = (OfferVersion.objects.filter(is_published=True, offer__is_active=True).exclude(offer__code=DEMO_OFFER)
+    rows = (OfferVersion.objects.filter(is_published=True, offer__is_active=True).exclude(offer__code__in=[DEMO_OFFER, "entreprise-sur-mesure"])
             .select_related("offer").order_by("offer__position", "offer__name", "-number"))
     seen, out = set(), []
     for v in rows:

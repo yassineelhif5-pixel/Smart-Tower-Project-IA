@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../../api/client";
 import { useApi } from "../../api/useApi";
 
-type Offer = { id: number; offer: string; description: string; number: number; price: string | null; currency: string; interval: string; intervalLabel: string; maxUsers: number | null; named: number; concurrent: number; payable: boolean };
+type Offer = { id: number; offer: string; description: string; number: number; price: string | null; currency: string; interval: string; intervalLabel: string; maxUsers: number | null; named: number; concurrent: number; features: string[]; payable: boolean };
 export type PaymentRow = { id: number; tenant: string; kind: string; label: string; amount: string; currency: string; interval: string; status: string; statusLabel: string; createdAt: string; paidAt: string | null; appliedAt: string | null; error: string; requestId: number | null; checkoutUrl: string; by: string };
 type Options = {
   configured: boolean; mode: string; currency: string;
@@ -14,11 +14,13 @@ type Options = {
   offers: Offer[];
   licensePrices: { named: string; concurrent: string; interval: string; intervalLabel: string };
   canBuyLicenses: boolean;
+  custom: { available: boolean; unit: string; interval: string; intervalLabel: string };
   preselect: { mode: "offer"; versionId: number } | { mode: "licenses"; licenseKind: "named" | "concurrent"; quantity: number } | null;
   request: { id: number; status: string; kind: string } | null;
   payments: PaymentRow[];
 };
 
+const CUSTOM = -1; // carte « Entreprise (sur mesure) »
 const money = (v: number | string, cur: string) => Number(v).toLocaleString("fr-FR", { style: "currency", currency: cur || "EUR" });
 
 export function PaymentPanel({ tenantId, requestId, pilot, onPaid }: { tenantId?: number; requestId?: number; pilot?: boolean; onPaid?: () => void }) {
@@ -30,6 +32,7 @@ export function PaymentPanel({ tenantId, requestId, pilot, onPaid }: { tenantId?
   const [versionId, setVersionId] = useState<number | null>(null);
   const [kind, setKind] = useState<"named" | "concurrent">("named");
   const [qty, setQty] = useState(1);
+  const [seats, setSeats] = useState(5);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
@@ -44,29 +47,29 @@ export function PaymentPanel({ tenantId, requestId, pilot, onPaid }: { tenantId?
       setQty(p.quantity);
     } else {
       setMode("offer");
-      setVersionId(p?.mode === "offer" ? p.versionId : o.offers.find((x) => x.payable)?.id ?? null);
+      setVersionId(p?.mode === "offer" ? p.versionId : o.offers.find((x) => x.payable)?.id ?? (o.custom?.available ? CUSTOM : null));
     }
   }, [r.data]);
 
   if (r.error) return <div className="callout warn"><b>{r.error.message}</b></div>;
   if (!r.data) return <p className="muted">Chargement des offres…</p>;
   const o = r.data;
-  if (!o.configured)
-    return <div className="callout info" style={{ display: "block" }}><b>Paiement en ligne indisponible</b> · le Pilote n’a pas encore configuré Stripe{pilot ? " (Pilote › Configuration › Paiement Stripe)" : ""}.</div>;
 
   const offer = o.offers.find((x) => x.id === versionId) ?? null;
-  const unit = mode === "licenses" ? Number(kind === "named" ? o.licensePrices.named : o.licensePrices.concurrent) : Number(offer?.price ?? 0);
-  const total = mode === "licenses" ? unit * qty : unit;
-  const interval = mode === "licenses" ? o.licensePrices.intervalLabel : offer?.intervalLabel ?? "";
-  const canPay = mode === "offer" ? !!offer?.payable : o.canBuyLicenses && unit > 0 && qty >= 1;
+  const isCustom = mode === "offer" && versionId === CUSTOM;
+  const unit = mode === "licenses" ? Number(kind === "named" ? o.licensePrices.named : o.licensePrices.concurrent) : isCustom ? Number(o.custom.unit) : Number(offer?.price ?? 0);
+  const total = mode === "licenses" ? unit * qty : isCustom ? unit * seats : unit;
+  const interval = mode === "licenses" ? o.licensePrices.intervalLabel : isCustom ? o.custom.intervalLabel : offer?.intervalLabel ?? "";
+  const canPay = o.configured && (mode === "offer" ? (isCustom ? o.custom.available && seats >= 1 : !!offer?.payable) : o.canBuyLicenses && unit > 0 && qty >= 1);
 
   const pay = async () => {
     setBusy(true);
     setError(null);
     try {
       const res = await api.post<{ url: string; paymentId: number }>("/payments/checkout", {
-        mode, versionId: mode === "offer" ? versionId : undefined, licenseKind: mode === "licenses" ? kind : undefined,
-        quantity: mode === "licenses" ? qty : 1, tenant: tenantId, request: requestId,
+        mode: isCustom ? "custom" : mode, versionId: mode === "offer" && !isCustom ? versionId : undefined,
+        licenseKind: mode === "licenses" ? kind : undefined,
+        quantity: mode === "licenses" ? qty : isCustom ? seats : 1, tenant: tenantId, request: requestId,
       });
       if (pilot) {
         setLink(res.url);
@@ -85,6 +88,7 @@ export function PaymentPanel({ tenantId, requestId, pilot, onPaid }: { tenantId?
         {o.tenant.name} · abonnement actuel : {o.current ? <b>{o.current.offer} v{o.current.version} ({o.current.status}{o.current.endDate ? `, jusqu’au ${new Date(o.current.endDate).toLocaleDateString("fr-FR")}` : ""})</b> : <b>aucun</b>}
         {o.mode === "test" && <span className="pill warn" style={{ marginLeft: 8 }}>Stripe en mode test</span>}
       </div>
+      {o.canBuyLicenses && (
       <div className="pay-modes" role="tablist">
         <button type="button" role="tab" aria-selected={mode === "offer"} className={`pay-mode${mode === "offer" ? " on" : ""}`} onClick={() => setMode("offer")}>
           <b>📦 Choisir une offre</b><small className="muted">Abonnement complet (licences et modules inclus)</small>
@@ -94,25 +98,44 @@ export function PaymentPanel({ tenantId, requestId, pilot, onPaid }: { tenantId?
           <b>🔢 Acheter des licences</b><small className="muted">{o.canBuyLicenses ? "Le nombre de votre choix, ajouté à l’abonnement" : "Nécessite d’abord une offre"}</small>
         </button>
       </div>
+      )}
 
       {mode === "offer" ? (
-        o.offers.length ? (
-          <div className="onb-offers">
-            {o.offers.map((x) => (
-              <label key={x.id} className={`onb-offer${versionId === x.id ? " on" : ""}${x.payable ? "" : " disabled"}`}>
-                <input type="radio" name={`pay-offer-${tenantId ?? "me"}`} disabled={!x.payable} checked={versionId === x.id} onChange={() => setVersionId(x.id)} />
-                <span style={{ flex: 1 }}>
-                  <b>{x.offer}</b> <span className="muted">v{x.number}</span>
-                  <span style={{ float: "right" }}>{x.payable ? <b>{money(x.price as string, x.currency)}</b> : <span className="muted">sur devis</span>} <small className="muted">{x.payable ? x.intervalLabel : ""}</small></span>
-                  <small className="muted" style={{ display: "block" }}>
-                    {[x.maxUsers ? `${x.maxUsers} utilisateurs` : "utilisateurs illimités", x.named ? `${x.named} licence(s) nominative(s)` : "", x.concurrent ? `${x.concurrent} concurrente(s)` : ""].filter(Boolean).join(" · ")}
-                    {x.description ? ` — ${x.description}` : ""}
-                  </small>
-                </span>
+        <div className="plan-grid">
+          {o.offers.map((x) => (
+            <button key={x.id} type="button" disabled={!x.payable} aria-pressed={versionId === x.id}
+              className={`plan-card${versionId === x.id ? " on" : ""}`} onClick={() => setVersionId(x.id)}>
+              <span className="plan-name">{x.offer}</span>
+              <span className="plan-price">{x.payable ? money(x.price as string, x.currency) : "Sur devis"}<small> {x.payable ? x.intervalLabel : ""}</small></span>
+              <ul>
+                <li>{x.maxUsers ? `${x.maxUsers} utilisateurs` : "Utilisateurs illimités"}</li>
+                {x.named > 0 && <li>{x.named} licence(s) nominative(s)</li>}
+                {x.concurrent > 0 && <li>{x.concurrent} licence(s) concurrente(s)</li>}
+                <li>{x.features.length ? `${x.features.length} modules` : "Tous les modules"}</li>
+              </ul>
+              {x.description && <small className="muted">{x.description}</small>}
+              <span className="plan-cta">{versionId === x.id ? "✓ Sélectionnée" : "Choisir"}</span>
+            </button>
+          ))}
+          <div role="button" tabIndex={0} aria-pressed={isCustom} aria-disabled={!o.custom.available}
+            className={`plan-card plan-custom${isCustom ? " on" : ""}${o.custom.available ? "" : " disabled"}`}
+            onClick={() => o.custom.available && setVersionId(CUSTOM)}
+            onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && o.custom.available) setVersionId(CUSTOM); }}>
+            <span className="plan-badge">Personnalisable</span>
+            <span className="plan-name">🏢 Entreprise</span>
+            <span className="plan-price">{o.custom.available ? <>{money(o.custom.unit, o.currency)}<small> / licence {o.custom.intervalLabel}</small></> : "Sur devis"}</span>
+            <ul><li>Le nombre de licences de votre choix</li><li>Tous les modules</li><li>Utilisateurs = licences nominatives</li></ul>
+            {o.custom.available ? (
+              <label className="plan-seats" onClick={(e) => e.stopPropagation()}>
+                <span>Nombre de licences</span>
+                <input className="inp num" type="number" min={1} max={1000} value={seats}
+                  onFocus={() => setVersionId(CUSTOM)}
+                  onChange={(e) => { setVersionId(CUSTOM); setSeats(Math.max(1, Math.min(1000, Number(e.target.value) || 1))); }} />
               </label>
-            ))}
+            ) : <small className="muted">Prix des licences non défini : contactez le Pilote.</small>}
+            <span className="plan-cta">{isCustom ? `✓ ${seats} licence(s) · ${money(Number(o.custom.unit) * seats, o.currency)}` : "Choisir"}</span>
           </div>
-        ) : <p className="muted">Aucune offre publiée.</p>
+        </div>
       ) : (
         <div className="grid g2" style={{ gap: 10 }}>
           <label><span className="muted" style={{ fontSize: 12 }}>Type de licence</span>
@@ -134,6 +157,7 @@ export function PaymentPanel({ tenantId, requestId, pilot, onPaid }: { tenantId?
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
         Paiement sécurisé par Stripe (carte, SEPA selon votre compte). L’abonnement ou les licences sont activés automatiquement dès la confirmation du paiement.
       </p>
+      {!o.configured && <div className="callout info" style={{ display: "block" }}><b>Paiement en ligne bientôt disponible</b> · le Pilote n’a pas encore activé Stripe{pilot ? " (Pilote › Configuration › Paiement en ligne)" : " : vous pouvez aussi demander l’activation au Pilote"}.</div>}
       {error && <div className="callout warn" role="alert"><b>{error}</b></div>}
       {link && (
         <div className="callout ok" style={{ display: "block" }}>

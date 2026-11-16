@@ -309,14 +309,40 @@ function OtherTenants({ me }: { me: Me }) {
   );
 }
 
-export function DemoBanner({ me }: { me: Me }) {
+export function DemoBanner({ me, onActivate }: { me: Me; onActivate?: () => void }) {
   const d = me.onboarding?.demo;
   if (!d || d.expired) return null;
   return (
     <div className="demo-banner" role="status">
-      <b>Démo</b> · {d.daysLeft <= 1 ? "dernier jour" : `${d.daysLeft} jours restants`} (jusqu’au {new Date(d.until).toLocaleDateString("fr-FR")})
-      · projets : {d.projects}/{d.maxProjects}
-      <span className="muted"> — à la fin de la démo, activez une licence ou rejoignez une entreprise.</span>
+      <span>
+        <b>Démo</b> · {d.daysLeft <= 1 ? "dernier jour" : `${d.daysLeft} jours restants`} (jusqu’au {new Date(d.until).toLocaleDateString("fr-FR")})
+        · projets : {d.projects}/{d.maxProjects}
+        <span className="muted"> — activez votre licence pour continuer sans limite après la démo.</span>
+      </span>
+      {me.onboarding?.isDemoAdmin && onActivate && (
+        <button type="button" className="btn primary sm" onClick={onActivate}>🔑 Activer ma licence</button>
+      )}
+    </div>
+  );
+}
+
+/** Page d'activation : choix de l'abonnement (offres publiées ou Entreprise sur mesure) puis paiement Stripe. */
+export function ActivationPage({ me, onClose }: { me: Me; onClose: () => void }) {
+  const d = me.onboarding?.demo;
+  return (
+    <div className="activation-page">
+      <div className="activation-head">
+        <div>
+          <p className="eyebrow" style={{ margin: 0 }}>Activer ma licence</p>
+          <h1 style={{ margin: "4px 0" }}>Choisissez votre abonnement</h1>
+          <p className="muted" style={{ margin: 0 }}>
+            {d ? `Votre démo « ${d.tenant} » devient votre espace définitif : vos projets et vos données sont conservés.` : "Choisissez une offre puis payez en ligne."}
+            {" "}Le paiement est sécurisé par Stripe ; l’abonnement est activé automatiquement.
+          </p>
+        </div>
+        <button type="button" className="btn ghost" onClick={onClose}>← Retour à l’application</button>
+      </div>
+      <div className="card"><div className="card-b"><PaymentPanel /></div></div>
     </div>
   );
 }

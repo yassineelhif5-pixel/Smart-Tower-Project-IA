@@ -69,6 +69,14 @@ class PaymentConfirmView(PaymentBase):
         if not sid.startswith("cs_"):
             raise ApiError("VALIDATION_ERROR", "Session de paiement invalide.")
         p = payments.confirm(sid, request.user)
+        if p.status == L.Payment.APPLIED and request.user.tenant_id == p.tenant_id:
+            # L'activation de l'offre ferme les sessions de l'entreprise : on rouvre celle du payeur.
+            from accounts.signup_views import open_license_session
+            from . import services as lic
+            try:
+                open_license_session(request, request.user)
+            except lic.LicenseError:
+                pass
         return Response(payments.payment_row(p))
 
 

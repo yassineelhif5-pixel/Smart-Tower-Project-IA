@@ -3039,3 +3039,23 @@ button.bell-item { width: 100%; text-align: left; border: 0; background: transpa
 .pay-details { border: 1px solid var(--line, #e2e8f0); border-radius: 10px; padding: 10px 12px; }
 .pay-details summary { cursor: pointer; }
 .pay-details[open] summary { margin-bottom: 10px; }
+
+/* ---------- Activation de licence (démo) ---------- */
+.demo-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.activation-page { position: fixed; inset: 0; z-index: 60; overflow: auto; padding: 28px clamp(16px, 4vw, 48px); background: var(--bg, #f8fafc); display: flex; flex-direction: column; gap: 18px; }
+.activation-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; max-width: 1180px; width: 100%; margin: 0 auto; }
+.activation-page > .card { max-width: 1180px; width: 100%; margin: 0 auto; }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.plan-card { position: relative; text-align: left; display: flex; flex-direction: column; gap: 8px; padding: 18px; border-radius: 14px; border: 1px solid var(--line, #e2e8f0); background: var(--card, #fff); color: inherit; font: inherit; cursor: pointer; transition: box-shadow .15s, border-color .15s; }
+.plan-card:hover:not(:disabled):not(.disabled) { border-color: #a5b4fc; }
+.plan-card.on { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .18); }
+.plan-card:disabled, .plan-card.disabled { opacity: .55; cursor: not-allowed; }
+.plan-card ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13px; }
+.plan-name { font-weight: 700; font-size: 17px; }
+.plan-price { font-size: 22px; font-weight: 800; }
+.plan-price small { font-size: 12px; font-weight: 500; color: var(--muted, #64748b); }
+.plan-cta { margin-top: auto; font-size: 13px; font-weight: 600; color: #4f46e5; }
+.plan-custom { background: linear-gradient(160deg, rgba(99, 102, 241, .07), rgba(168, 85, 247, .07)); }
+.plan-badge { position: absolute; top: -10px; right: 14px; background: linear-gradient(90deg, #6366f1, #a855f7); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.plan-seats { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.plan-seats input { max-width: 140px; }

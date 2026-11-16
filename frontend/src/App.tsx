@@ -10,7 +10,7 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MyAccessPage } from "./pages/MyAccessPage";
-import { DemoBanner, OnboardingPage } from "./pages/OnboardingPage";
+import { ActivationPage, DemoBanner, OnboardingPage } from "./pages/OnboardingPage";
 import { JoinRequestsPanel } from "./features/configuration/JoinRequestsPanel";
 import { PaymentReturn } from "./features/licensing/PaymentPanel";
 import { SSORequestsPanel } from "./features/configuration/SSORequestsPanel";
@@ -69,6 +69,7 @@ type Session =
 export function App() {
   const [session, setSession] = useState<Session>({ status: "loading" });
   const [hash, setHash] = useState(window.location.hash);
+  const [activation, setActivation] = useState(false);
   useEffect(() => {
     const on = () => setHash(window.location.hash);
     window.addEventListener("hashchange", on);
@@ -122,7 +123,8 @@ export function App() {
   return (
     <Shell me={me} onLogout={logout} routes={allowed} route={route}>
       <PaymentReturn onDone={refresh} />
-      <DemoBanner me={me} />
+      <DemoBanner me={me} onActivate={() => setActivation(true)} />
+      {activation && <ActivationPage me={me} onClose={() => setActivation(false)} />}
       {route === "pilote" && <PilotPage />}
       <Suspense fallback={<Loading />}>
         {route === "pilotage" && <MethodologyPage me={me} />}
