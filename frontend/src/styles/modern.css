@@ -3059,3 +3059,42 @@ button.bell-item { width: 100%; text-align: left; border: 0; background: transpa
 .plan-badge { position: absolute; top: -10px; right: 14px; background: linear-gradient(90deg, #6366f1, #a855f7); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
 .plan-seats { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .plan-seats input { max-width: 140px; }
+
+/* ---------- Module Recette ---------- */
+.rec-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.rec-kpi { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line, #e2e8f0); background: var(--card, #fff); cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.rec-kpi b { font-size: 22px; }
+.rec-kpi span { font-size: 12px; color: var(--muted, #64748b); }
+.rec-kpi.ok b { color: #16a34a; } .rec-kpi.crit b { color: #dc2626; } .rec-kpi.warn b { color: #d97706; } .rec-kpi.info b { color: #2563eb; } .rec-kpi.acc b { color: #7c3aed; }
+.rec-kpi.on { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, .15); }
+.rec-progress { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--bg-soft, #f1f5f9); margin-bottom: 14px; }
+.rec-progress .ok { background: #22c55e; } .rec-progress .crit { background: #ef4444; } .rec-progress .acc { background: #8b5cf6; }
+.rec-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.rec-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rec-mine { display: flex; gap: 6px; align-items: center; font-size: 13px; white-space: nowrap; }
+.rec-row { cursor: pointer; }
+.rec-row:hover td { background: var(--bg-soft, #f8fafc); }
+.btn.ok { border-color: #22c55e; color: #15803d; } .btn.crit { border-color: #ef4444; color: #b91c1c; }
+.rec-detail { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+@media (max-width: 860px) { .rec-detail { grid-template-columns: 1fr; } }
+.rec-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.rec-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.rec-status-bar { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 10px; background: var(--bg-soft, #f1f5f9); }
+.rec-text span { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+.rec-text p { margin: 2px 0 0; white-space: pre-wrap; }
+.rec-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line, #e2e8f0); padding-top: 10px; }
+.rec-section-h { display: flex; justify-content: space-between; align-items: center; }
+.rec-bug-line { text-align: left; display: block; width: 100%; padding: 8px 10px; border: 1px solid var(--line, #e2e8f0); border-radius: 8px; background: var(--card, #fff); cursor: pointer; color: inherit; font: inherit; }
+.rec-bug-line:hover { border-color: #a5b4fc; }
+.rec-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rec-form label, .rec-inline { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted, #64748b); }
+.rec-form .span2 { grid-column: 1 / -1; }
+.rec-bug-form { padding: 10px; border: 1px dashed #fca5a5; border-radius: 10px; background: rgba(254, 226, 226, .3); }
+.rec-thread { display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--line, #e2e8f0); padding-left: 14px; min-height: 300px; }
+@media (max-width: 860px) { .rec-thread { border-left: 0; padding-left: 0; border-top: 1px solid var(--line, #e2e8f0); padding-top: 10px; } }
+.rec-thread-list { flex: 1; overflow: auto; max-height: 55vh; display: flex; flex-direction: column; gap: 8px; }
+.rec-msg { padding: 8px 10px; border-radius: 10px; background: var(--bg-soft, #f1f5f9); }
+.rec-msg p { margin: 2px 0 0; white-space: pre-wrap; font-size: 13px; }
+.rec-msg-h { font-size: 12px; }
+.rec-event { font-size: 12px; color: var(--muted, #64748b); }
+.rec-thread-form { display: flex; flex-direction: column; gap: 6px; }

@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     "methodology",
     "aicalls",
     "clientspace",
+    "recette",
 ]
 
 MIDDLEWARE = [

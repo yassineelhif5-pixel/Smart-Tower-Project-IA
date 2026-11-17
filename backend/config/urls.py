@@ -15,6 +15,7 @@ from configuration import client_domains, pilot_users
 from licensing import views as lic
 from licensing import contract_report
 from licensing import payment_views as pay
+from recette import views as recette
 from projects import views as projects
 from tenants import views as tenants
 
@@ -135,6 +136,14 @@ api_patterns = [
     path("auth/sso/start", auth.SSOStartView.as_view()),
     path("auth/sso/callback", auth.SSOCallbackView.as_view()),
     path("auth/providers", signup_api.ProvidersView.as_view()),
+    path("recette/projects", recette.ProjectsView.as_view()),
+    path("recette/board", recette.BoardView.as_view()),
+    path("recette/stories", recette.StoriesView.as_view()),
+    path("recette/stories/<int:pk>", recette.StoryView.as_view()),
+    path("recette/stories/<int:pk>/status", recette.StoryStatusView.as_view()),
+    path("recette/bugs", recette.BugsView.as_view()),
+    path("recette/bugs/<int:pk>", recette.BugView.as_view()),
+    path("recette/thread", recette.ThreadView.as_view()),
     path("auth/invitation", signup_api.InvitationInfoView.as_view()),
     path("auth/invitation/accept", signup_api.InvitationAcceptView.as_view()),
     path("invitations", signup_api.InvitationsView.as_view()),

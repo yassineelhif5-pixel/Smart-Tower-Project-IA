@@ -10,6 +10,7 @@ import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { ConfigurationPage } from "./pages/ConfigurationPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MyAccessPage } from "./pages/MyAccessPage";
+import { RecettePage } from "./features/recette/RecettePage";
 import { ActivationPage, DemoBanner, OnboardingPage } from "./pages/OnboardingPage";
 import { JoinRequestsPanel } from "./features/configuration/JoinRequestsPanel";
 import { InvitePanel } from "./features/configuration/InvitePanel";
@@ -30,7 +31,7 @@ const CollaborationPage = lazy(() =>
   import("./pages/CollaborationPage").then((m) => ({ default: m.CollaborationPage })),
 );
 
-export type Route = "pilote" | "projets" | "reporting" | "pilotage" | "calendrier" | "collaboration" | "configuration" | "licences" | "acces" | "sso-requests" | "access-requests" | "temps" | "maintenance" | "support" | "espace-client";
+export type Route = "pilote" | "projets" | "reporting" | "pilotage" | "calendrier" | "collaboration" | "configuration" | "licences" | "acces" | "sso-requests" | "access-requests" | "temps" | "recette" | "maintenance" | "support" | "espace-client";
 
 const LICENSE_CAPS = ["licenses.view", "sessions.view", "requests.view"];
 
@@ -45,6 +46,7 @@ export function routesFor(me: Me): Route[] {
   if (me.permissions.planning?.[0]) work.push("calendrier");
   if (me.permissions.collaboration?.[0]) work.push("collaboration");
   if (me.permissions.timesheet?.[0]) work.push("temps");
+  if (me.permissions.test?.[0] || ["admin", "cdp", "amoa", "testeur", "techlead", "dev", "consultant"].includes(me.role?.code ?? "")) work.push("recette");
   if (me.clientSpaceEnabled) work.push("espace-client");
   if (me.maintenanceEnabled) work.push("maintenance");
   if (me.capabilities.includes("users.approve_sso")) work.push("sso-requests");
@@ -150,6 +152,7 @@ export function App() {
       {route === "projets" && <ProjectsPage me={me} />}
       {route === "reporting" && <ReportingPage me={me} />}
       {route === "temps" && <TimeSheetPage me={me} />}
+      {route === "recette" && <RecettePage />}
       {route === "espace-client" && <ClientSpacePage me={me} />}
       {route === "maintenance" && <MaintenanceWorkspace me={me} />}
       {route === "support" && <MaintenanceWorkspace me={me} />}

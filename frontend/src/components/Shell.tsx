@@ -24,6 +24,7 @@ const NAV: Record<Route, string> = {
   "sso-requests": "user",
   "access-requests": "user",
   temps: "clock",
+  recette: "bug",
   maintenance: "chat",
   support: "chat",
   "espace-client": "file",
